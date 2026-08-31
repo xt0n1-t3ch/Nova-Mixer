@@ -41,3 +41,6 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 parking_lot.workspace = true
 dirs.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_System_Power", "Win32_System_Threading"] }

@@ -1,6 +1,7 @@
 use audio_policy::percent_to_scalar;
 use novamixer_contracts::{
-    AppBinding, AppSettings, Density, Group, HotkeyAction, HotkeyBinding, Theme, UiPrefs,
+    AppSettings, Application, Density, Group, HotkeyAction, HotkeyBinding, IdentityKind, Theme,
+    UiPrefs,
 };
 use serde::Deserialize;
 use std::{
@@ -77,17 +78,24 @@ impl SettingsStore {
             }
         }
         match read_settings(&main) {
-            Ok(settings) => LoadReport {
-                settings,
-                migration_ran: false,
-                recovered_backup: false,
-            },
+            Ok((settings, migrated)) => {
+                if migrated {
+                    if let Err(error) = atomic_write_json(&main, &settings) {
+                        error!(%error, path = %main.display(), "cannot write migrated settings");
+                    }
+                }
+                LoadReport {
+                    settings,
+                    migration_ran: migrated,
+                    recovered_backup: false,
+                }
+            }
             Err(main_err) => {
                 if main.exists() {
                     warn!(error = %main_err, path = %main.display(), "settings file is unreadable; trying backup");
                 }
                 match read_settings(&self.backup_path()) {
-                    Ok(settings) => {
+                    Ok((settings, _)) => {
                         warn!(path = %self.backup_path().display(), "recovered settings from backup");
                         LoadReport {
                             settings,
@@ -120,7 +128,7 @@ impl SettingsStore {
     }
 
     pub fn restore_backup(&self) -> io::Result<AppSettings> {
-        let settings = read_settings(&self.backup_path())?;
+        let (settings, _) = read_settings(&self.backup_path())?;
         self.save(&settings)?;
         Ok(settings)
     }
@@ -141,11 +149,87 @@ impl SettingsStore {
     }
 }
 
-fn read_settings(path: &Path) -> io::Result<AppSettings> {
+fn read_settings(path: &Path) -> io::Result<(AppSettings, bool)> {
     let bytes = fs::read(path)?;
-    let mut settings: AppSettings = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    let migrated = value.get("schema_version").and_then(|v| v.as_u64()) == Some(1);
+    let mut settings = if migrated {
+        migrate_v1(value)?
+    } else {
+        serde_json::from_value(value).map_err(io::Error::other)?
+    };
     settings.validate();
-    Ok(settings)
+    Ok((settings, migrated))
+}
+
+fn migrate_v1(mut value: serde_json::Value) -> io::Result<AppSettings> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("settings root is not an object"))?;
+    object.insert("schema_version".into(), 2.into());
+    object
+        .entry("scenes")
+        .or_insert_with(|| serde_json::json!([]));
+    object.entry("efficiency_mode").or_insert(false.into());
+    if let Some(ui) = object.get_mut("ui_prefs").and_then(|v| v.as_object_mut()) {
+        if let Some(show) = ui.remove("show_inactive") {
+            ui.insert("show_offline".into(), show);
+        }
+        ui.entry("show_hidden").or_insert(false.into());
+    }
+    let mut applications = Vec::new();
+    if let Some(groups) = object.get_mut("groups").and_then(|v| v.as_array_mut()) {
+        for group in groups {
+            if let Some(g) = group.as_object_mut() {
+                let apps = g
+                    .remove("apps")
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default();
+                let mut keys = Vec::new();
+                for item in apps {
+                    if let Some(key) = item.get("app_key").and_then(|v| v.as_str()) {
+                        let executable_path = item.get("executable_path").and_then(|v| v.as_str());
+                        let app_key = audio_policy::resolve_app_key(
+                            None,
+                            executable_path,
+                            item.get("executable_name")
+                                .and_then(|v| v.as_str())
+                                .or(Some(key)),
+                        );
+                        keys.push(app_key.clone());
+                        let mut app = Application::offline(
+                            app_key,
+                            if executable_path.is_some() {
+                                IdentityKind::Path
+                            } else {
+                                IdentityKind::Filename
+                            },
+                            item.get("display_name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(key)
+                                .to_owned(),
+                        );
+                        app.executable_name = item
+                            .get("executable_name")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned);
+                        app.executable_path = item
+                            .get("executable_path")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned);
+                        app.group_id = g.get("id").and_then(|v| v.as_str()).map(str::to_owned);
+                        applications.push(app);
+                    }
+                }
+                g.insert("app_keys".into(), serde_json::json!(keys));
+            }
+        }
+    }
+    object.insert(
+        "applications".into(),
+        serde_json::to_value(applications).map_err(io::Error::other)?,
+    );
+    serde_json::from_value(value).map_err(io::Error::other)
 }
 
 fn atomic_write_json(path: &Path, settings: &AppSettings) -> io::Result<()> {
@@ -289,15 +373,45 @@ impl LegacyConfig {
     fn into_settings(self) -> AppSettings {
         let default_id = self.default_group_id;
         AppSettings {
-            schema_version: 1,
+            schema_version: 2,
             ui_prefs: UiPrefs {
                 theme: Theme::Dark,
                 language: if self.language == 1 { "es" } else { "en" }.into(),
                 sidebar_collapsed: self.sidebar_collapsed,
                 density: Density::Comfy,
-                show_inactive: true,
+                show_offline: true,
+                show_hidden: false,
                 show_system_sounds: true,
             },
+            applications: self
+                .groups
+                .iter()
+                .flat_map(|group| {
+                    group.processes.iter().map(|process| {
+                        let app_key = audio_policy::resolve_app_key(
+                            None,
+                            process.exe_path.as_deref(),
+                            Some(&process.process_name),
+                        );
+                        let mut app = Application::offline(
+                            app_key,
+                            if process.exe_path.is_some() {
+                                IdentityKind::Path
+                            } else {
+                                IdentityKind::Filename
+                            },
+                            process
+                                .display_name
+                                .clone()
+                                .unwrap_or_else(|| process.process_name.clone()),
+                        );
+                        app.executable_name = Some(process.process_name.clone());
+                        app.executable_path = process.exe_path.clone();
+                        app.group_id = Some(group.id.clone());
+                        app
+                    })
+                })
+                .collect(),
             groups: self
                 .groups
                 .into_iter()
@@ -306,16 +420,15 @@ impl LegacyConfig {
                     id: group.id,
                     name: group.name,
                     volume: percent_to_scalar(group.volume_percent),
-                    apps: group
+                    app_keys: group
                         .processes
                         .into_iter()
-                        .map(|process| AppBinding {
-                            app_key: process.process_name.to_lowercase(),
-                            display_name: process
-                                .display_name
-                                .unwrap_or_else(|| process.process_name.clone()),
-                            executable_name: Some(process.process_name),
-                            executable_path: process.exe_path,
+                        .map(|process| {
+                            audio_policy::resolve_app_key(
+                                None,
+                                process.exe_path.as_deref(),
+                                Some(&process.process_name),
+                            )
                         })
                         .collect(),
                     startup_volume: group.startup_volume_percent.map(percent_to_scalar),
@@ -323,6 +436,7 @@ impl LegacyConfig {
                     hotkeys_enabled: group.enable_hotkeys,
                 })
                 .collect(),
+            scenes: vec![],
             active_group_id: nonempty_string(self.active_group_id),
             hotkeys: vec![
                 hotkey(HotkeyAction::VolumeUp, self.volume_up_key),
@@ -335,6 +449,7 @@ impl LegacyConfig {
             start_minimized: self.start_minimized,
             minimize_to_tray: self.minimize_to_tray,
             auto_save: self.auto_save,
+            efficiency_mode: false,
         }
     }
 }
@@ -387,11 +502,15 @@ mod tests {
         assert_eq!(group.volume, 0.375);
         assert_eq!(
             group
-                .apps
+                .app_keys
                 .iter()
-                .map(|app| app.app_key.as_str())
+                .map(String::as_str)
                 .collect::<Vec<_>>(),
-            vec!["msedge.exe", "thorium.exe", "spotify.exe"]
+            vec![
+                "c:\\program files (x86)\\microsoft\\edge\\application\\msedge.exe",
+                "c:\\users\\xt0n1\\appdata\\local\\thorium\\application\\thorium.exe",
+                "c:\\users\\xt0n1\\appdata\\roaming\\spotify\\spotify.exe"
+            ]
         );
         assert_eq!(
             report
@@ -417,6 +536,37 @@ mod tests {
     }
 
     #[test]
+    fn migrates_snake_case_v1_once_and_uses_known_path() {
+        let root = tempdir().unwrap();
+        let store = SettingsStore::with_paths(root.path().to_path_buf(), PathBuf::new());
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1-settings.json"),
+            store.settings_path(),
+        )
+        .unwrap();
+        let first = store.load();
+        assert!(first.migration_ran);
+        assert_eq!(first.settings.schema_version, 2);
+        assert_eq!(first.settings.applications.len(), 1);
+        assert_eq!(
+            first.settings.applications[0].identity_kind,
+            IdentityKind::Path
+        );
+        assert_eq!(
+            first.settings.applications[0].app_key,
+            "c:\\users\\test\\appdata\\roaming\\spotify\\spotify.exe"
+        );
+        assert_eq!(
+            first.settings.groups[0].app_keys,
+            vec![first.settings.applications[0].app_key.clone()]
+        );
+        let raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(store.settings_path()).unwrap()).unwrap();
+        assert_eq!(raw["schema_version"], 2);
+        assert!(!store.load().migration_ran);
+    }
+
+    #[test]
     fn corrupt_main_recovers_backup() {
         let root = tempdir().unwrap();
         let store = SettingsStore::with_paths(root.path().to_path_buf(), PathBuf::new());
@@ -439,7 +589,7 @@ mod tests {
         let mut second = first.clone();
         second.volume_step = 0.2;
         store.save(&second).unwrap();
-        assert_eq!(read_settings(&store.backup_path()).unwrap(), first);
-        assert_eq!(read_settings(&store.settings_path()).unwrap(), second);
+        assert_eq!(read_settings(&store.backup_path()).unwrap().0, first);
+        assert_eq!(read_settings(&store.settings_path()).unwrap().0, second);
     }
 }

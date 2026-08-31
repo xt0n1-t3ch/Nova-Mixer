@@ -6,6 +6,27 @@ All notable changes to NovaMixer appear in this file. The format follows [Keep a
 
 NovaMixer 2.0.0 is a complete rewrite. The C# and WPF implementation is archived under `old/`.
 
+### Added
+
+- **The mixer is now built around applications rather than Windows audio sessions.** Windows gives
+  one application several sessions whenever it likes, so the first build of this rewrite showed
+  Discord as two identical rows and lost a row the moment its session expired. An application is now
+  a persistent object that owns its sessions as children, stays listed while it is closed, and keeps
+  its settings reachable. Setting its volume is a policy: every live session takes that value, and a
+  session created later inherits it.
+- Manage applications directly: add one from what is playing now or by browsing for a closed one,
+  rename it, pin it, hide it, assign it to a group, remember its level, and remove it. Removing
+  forgets NovaMixer's settings and never closes or uninstalls the application, which the confirmation
+  states plainly.
+- A per-application disclosure that lists its individual audio streams, for the moment a user needs
+  to know which of an application's two streams is the loud one.
+- Scenes: save every level exactly as it sounds right now and bring the whole set back with one
+  click, with an optional fade.
+- A command palette on Ctrl+K over applications, scenes, and actions.
+- Windows efficiency mode, opt-in. Task Manager shows the green leaf only when a process has both a
+  low base priority and EcoQoS, so NovaMixer applies both — and exempts the audio worker thread, or
+  the mixer would feel sluggish under load.
+
 ### Fixed
 
 - An application launched after NovaMixer can now be controlled. The previous version enumerated
@@ -22,6 +43,12 @@ NovaMixer 2.0.0 is a complete rewrite. The C# and WPF implementation is archived
   to the previous endpoint.
 - A session whose process denies metadata access stays listed and controllable instead of
   disappearing.
+- An application's row now follows a volume change made anywhere else — the Windows mixer, the
+  application's own controls, a script. Live sessions are read as the truth whenever they agree,
+  rather than the row continuing to report the last level NovaMixer set.
+- An application configured before this release no longer appears twice. A saved entry identified
+  only by file name is merged into the canonical executable path the moment that application is
+  seen running, keeping its saved level, name, and group.
 - A global shortcut the platform rejects no longer prevents the application from starting. The
   binding is logged and left unbound, and a settings file carrying the old, unparseable
   `MediaVolume*` key names is repaired on load.

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "ui_prefs": {
+    "theme": "dark",
+    "language": "en",
+    "sidebar_collapsed": false,
+    "density": "comfy",
+    "show_inactive": true,
+    "show_system_sounds": true
+  },
+  "groups": [{
+    "id": "main",
+    "name": "Main",
+    "is_default": true,
+    "volume": 0.35,
+    "apps": [{
+      "app_key": "spotify.exe",
+      "display_name": "Spotify",
+      "executable_name": "Spotify.exe",
+      "executable_path": "C:\\Users\\test\\AppData\\Roaming\\Spotify\\Spotify.exe"
+    }],
+    "startup_volume": null,
+    "auto_mute_on_launch": false,
+    "hotkeys_enabled": true
+  }],
+  "active_group_id": "main",
+  "hotkeys": [],
+  "volume_step": 0.05,
+  "smart_volume": true,
+  "launch_on_startup": false,
+  "start_minimized": false,
+  "minimize_to_tray": true,
+  "auto_save": true
+}

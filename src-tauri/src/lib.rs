@@ -1,5 +1,6 @@
 mod commands;
 mod desktop;
+mod efficiency;
 mod error;
 mod ipc_bindings;
 mod logging;
@@ -46,15 +47,17 @@ pub fn run() {
             let handle = app.handle().clone();
             let application =
                 novamixer_application::NovaMixerApplication::start(move |event| match event {
-                    audio_sessions::AudioEvent::SessionAdded(value) => {
-                        let _ = handle.emit("session-added", value);
+                    audio_sessions::AudioEvent::ApplicationAdded(value) => {
+                        let _ = handle.emit("application-added", value);
                     }
-                    audio_sessions::AudioEvent::SessionUpdated(value) => {
-                        let _ = handle.emit("session-updated", value);
+                    audio_sessions::AudioEvent::ApplicationUpdated(value) => {
+                        let _ = handle.emit("application-updated", value);
                     }
-                    audio_sessions::AudioEvent::SessionRemoved { live_id } => {
-                        let _ = handle
-                            .emit("session-removed", serde_json::json!({ "live_id": live_id }));
+                    audio_sessions::AudioEvent::ApplicationRemoved { app_key } => {
+                        let _ = handle.emit(
+                            "application-removed",
+                            serde_json::json!({ "app_key": app_key }),
+                        );
                     }
                     audio_sessions::AudioEvent::MasterUpdated(value) => {
                         desktop::update_tray(&handle, value.volume, value.muted);
@@ -68,7 +71,14 @@ pub fn run() {
                     }
                 })
                 .map_err(|error| error.to_string())?;
+            let efficiency_enabled = application.settings().efficiency_mode;
             app.manage(state::AppState::new(application));
+            if efficiency_enabled {
+                let status = efficiency::set(true);
+                if !status.enabled {
+                    tracing::warn!(detail = ?status.detail, "cannot reapply efficiency mode");
+                }
+            }
             desktop::setup(app.handle()).map_err(|error| error.to_string())?;
             Ok(())
         })
@@ -86,20 +96,34 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            list_sessions,
+            list_applications,
+            set_app_volume,
+            set_app_mute,
             set_session_volume,
             set_session_mute,
+            add_application,
+            remove_application,
+            update_application,
+            reorder_applications,
+            list_app_candidates,
             set_master_volume,
             set_master_mute,
+            list_output_devices,
+            set_default_output,
             set_group_volume,
             set_active_group,
             upsert_group,
             delete_group,
-            list_running_apps,
+            upsert_scene,
+            delete_scene,
+            apply_scene,
+            capture_scene,
             get_settings,
             save_settings,
             restore_backup,
             set_hotkeys,
+            set_efficiency_mode,
+            get_efficiency_status,
             open_data_folder,
             set_metering_active,
             open_devtools,

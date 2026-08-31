@@ -1,15 +1,27 @@
 # Understand the NovaMixer architecture
 
-NovaMixer separates Windows audio work, application policy, the Tauri command boundary, and the Svelte interface. This page explains those boundaries and their contract owners.
+NovaMixer separates persistent application policy, live Windows audio controls, desktop integration, and the Svelte interface. This page identifies each backend owner and the data flow between them.
 
-## Workspace boundaries
+## The contract defines the boundary
 
-The Cargo workspace contains the desktop shell, shared contracts, task automation, and audio crates. The pnpm workspace contains the Svelte frontend.
+`contracts/ipc.md` owns wire types, commands, events, and invariants. `crates/novamixer-contracts` implements those data transfer objects. `crates/xtask` generates the frontend command registry from `src-tauri/src/lib.rs`.
 
-## Contract ownership
+## The audio worker owns COM interfaces
 
-`contracts/ipc.md` owns every wire name and type. `crates/novamixer-contracts` implements those data transfer objects. `src-tauri/src/lib.rs` owns registered commands, and `crates/xtask` projects that registry into TypeScript.
+`crates/audio-sessions` runs one multithreaded apartment worker. The worker owns endpoint and session COM interfaces, notification sinks, application aggregation, metering, and output device operations.
 
-## Offline security model
+Callers send plain Rust values through a channel. No COM interface crosses the worker boundary. Fake `SessionSource` implementations test aggregation and policy without Windows COM.
 
-NovaMixer performs no network requests during normal use. The Content Security Policy (CSP) permits application assets, Tauri IPC, embedded data images, and local fonts. Tauri capabilities grant only the plugins and window actions that the application uses.
+## The application service owns durable operations
+
+`crates/novamixer-application` combines the audio registry with `crates/settings-store`. It manages applications, groups, scenes, and settings writes. `crates/audio-policy` resolves identities and computes group startup policy.
+
+`src-tauri/src/commands` exposes the contract to the frontend. `src-tauri/src/desktop.rs` owns the tray, autostart, close-to-tray behavior, and global shortcuts.
+
+## Settings use schema version 2
+
+`crates/settings-store` writes the persistent application registry. It migrates version 1 groups from embedded application objects to `app_keys`, then seeds applications from those objects. The older PascalCase C# format enters the same version 2 model.
+
+## Normal operation stays offline
+
+NovaMixer makes no network requests during normal use. The Content Security Policy permits application assets, Tauri inter-process communication, embedded icon data, and local fonts.

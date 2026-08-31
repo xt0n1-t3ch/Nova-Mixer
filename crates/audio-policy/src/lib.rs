@@ -29,12 +29,12 @@ pub fn group_for<'a>(app_key: &str, groups: &'a [Group]) -> Option<&'a Group> {
         .unwrap_or(app_key)
         .to_lowercase();
     groups.iter().find(|group| {
-        group.apps.iter().any(|app| {
-            let candidate = app.app_key.to_lowercase();
-            let candidate_bare = Path::new(&app.app_key)
+        group.app_keys.iter().any(|app_key| {
+            let candidate = app_key.to_lowercase();
+            let candidate_bare = Path::new(app_key)
                 .file_name()
                 .and_then(|name| name.to_str())
-                .unwrap_or(&app.app_key)
+                .unwrap_or(app_key)
                 .to_lowercase();
             candidate == key || candidate == bare || candidate_bare == key || candidate_bare == bare
         })
@@ -127,7 +127,7 @@ fn canonicalize_identity_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use novamixer_contracts::{AppBinding, Group};
+    use novamixer_contracts::Group;
 
     fn group(app_key: &str) -> Group {
         Group {
@@ -135,12 +135,7 @@ mod tests {
             name: "Main".into(),
             is_default: true,
             volume: 0.625,
-            apps: vec![AppBinding {
-                app_key: app_key.into(),
-                display_name: "Spotify".into(),
-                executable_name: Some("Spotify.exe".into()),
-                executable_path: None,
-            }],
+            app_keys: vec![app_key.into()],
             startup_volume: None,
             auto_mute_on_launch: false,
             hotkeys_enabled: true,

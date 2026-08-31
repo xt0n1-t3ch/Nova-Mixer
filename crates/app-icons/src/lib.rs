@@ -6,6 +6,7 @@ pub struct ProcessMetadata {
     pub executable_path: Option<String>,
     pub executable_name: Option<String>,
     pub aumid: Option<String>,
+    pub version_name: Option<String>,
 }
 
 #[derive(Default)]
@@ -41,6 +42,18 @@ pub fn metadata_for_process(process_id: u32) -> ProcessMetadata {
     platform::metadata_for_process(process_id)
 }
 
+pub fn metadata_for_path(path: &Path) -> ProcessMetadata {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    ProcessMetadata {
+        executable_name: canonical
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned()),
+        executable_path: Some(canonical.to_string_lossy().into_owned()),
+        aumid: None,
+        version_name: platform::version_name(&canonical),
+    }
+}
+
 #[cfg(not(windows))]
 mod platform {
     use super::ProcessMetadata;
@@ -51,7 +64,12 @@ mod platform {
             executable_path: None,
             executable_name: None,
             aumid: None,
+            version_name: None,
         }
+    }
+
+    pub fn version_name(_path: &Path) -> Option<String> {
+        None
     }
 
     pub fn extract_icon(_path: &Path) -> Option<String> {
@@ -112,6 +130,7 @@ mod platform {
                     executable_path: None,
                     executable_name: None,
                     aumid: None,
+                    version_name: None,
                 };
             };
             let handle = Handle(handle);
@@ -148,11 +167,74 @@ mod platform {
             } else {
                 None
             };
+            let version_name = executable_path
+                .as_deref()
+                .and_then(|path| version_name(Path::new(path)));
             ProcessMetadata {
                 executable_path,
                 executable_name,
                 aumid,
+                version_name,
             }
+        }
+    }
+
+    pub fn version_name(path: &Path) -> Option<String> {
+        use windows::Win32::Storage::FileSystem::{
+            GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+        };
+        unsafe {
+            let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+            let size = GetFileVersionInfoSizeW(PCWSTR(wide.as_ptr()), None);
+            if size == 0 {
+                return None;
+            }
+            let mut data = vec![0u8; size as usize];
+            GetFileVersionInfoW(PCWSTR(wide.as_ptr()), None, size, data.as_mut_ptr().cast())
+                .ok()?;
+            let translation_key: Vec<u16> = "\\VarFileInfo\\Translation\0".encode_utf16().collect();
+            let mut translation = std::ptr::null_mut();
+            let mut translation_len = 0;
+            let (language, codepage) = if VerQueryValueW(
+                data.as_ptr().cast(),
+                PCWSTR(translation_key.as_ptr()),
+                &mut translation,
+                &mut translation_len,
+            )
+            .as_bool()
+                && translation_len >= 4
+            {
+                let values = std::slice::from_raw_parts(translation.cast::<u16>(), 2);
+                (values[0], values[1])
+            } else {
+                (0x0409, 0x04b0)
+            };
+            for field in ["FileDescription", "ProductName"] {
+                let query: Vec<u16> =
+                    format!("\\StringFileInfo\\{language:04x}{codepage:04x}\\{field}\0")
+                        .encode_utf16()
+                        .collect();
+                let mut value = std::ptr::null_mut();
+                let mut len = 0;
+                if VerQueryValueW(
+                    data.as_ptr().cast(),
+                    PCWSTR(query.as_ptr()),
+                    &mut value,
+                    &mut len,
+                )
+                .as_bool()
+                    && len > 1
+                {
+                    let text = String::from_utf16_lossy(std::slice::from_raw_parts(
+                        value.cast::<u16>(),
+                        len as usize - 1,
+                    ));
+                    if !text.trim().is_empty() {
+                        return Some(text);
+                    }
+                }
+            }
+            None
         }
     }
 

@@ -4,12 +4,16 @@ use serde::Serialize;
 #[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("Windows audio is unavailable")]
-    AudioUnavailable,
+    #[error("Windows audio is unavailable: {0}")]
+    AudioUnavailable(String),
     #[error("the audio session no longer exists")]
     SessionGone,
     #[error("the audio session cannot be controlled")]
     NotControllable,
+    #[error("application not found")]
+    AppUnknown,
+    #[error("unsupported operation: {0}")]
+    Unsupported(String),
     #[error("validation failed: {0}")]
     Validation(String),
     #[error("io error: {0}")]
@@ -23,9 +27,11 @@ pub enum AppError {
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let kind = match self {
-            Self::AudioUnavailable => "audio_unavailable",
+            Self::AudioUnavailable(_) => "audio_unavailable",
             Self::SessionGone => "session_gone",
             Self::NotControllable => "not_controllable",
+            Self::AppUnknown => "app_unknown",
+            Self::Unsupported(_) => "unsupported",
             Self::Validation(_) => "validation",
             Self::Io(_) => "io",
             Self::Serde(_) => "other",

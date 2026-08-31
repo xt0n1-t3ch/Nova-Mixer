@@ -149,7 +149,7 @@ async fn apply_hotkey<R: Runtime>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let state = app.state::<AppState>();
     let settings = state.application.settings();
-    let snapshot = state.application.audio.list_sessions().await?;
+    let snapshot = state.application.audio.list_applications().await?;
     let active_group = settings
         .active_group_id
         .as_deref()
@@ -174,13 +174,12 @@ async fn apply_hotkey<R: Runtime>(
                 ),
             ),
             HotkeyAction::MuteToggle => {
-                for session in snapshot.sessions.iter().filter(|session| {
-                    audio_policy::group_for(&session.app_key, std::slice::from_ref(group)).is_some()
+                for application in snapshot.applications.iter().filter(|application| {
+                    group.app_keys.iter().any(|key| key == &application.app_key)
                 }) {
                     state
                         .application
-                        .audio
-                        .set_session_mute(session.live_id.clone(), !session.muted)
+                        .set_app_mute(&application.app_key, !application.muted)
                         .await?;
                 }
                 return Ok(());

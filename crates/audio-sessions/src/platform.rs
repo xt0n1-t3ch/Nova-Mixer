@@ -32,17 +32,22 @@ use windows::{
 const CLSID_STD_GLOBAL_INTERFACE_TABLE: GUID =
     GUID::from_u128(0x00000323_0000_0000_c000_000000000046);
 
-pub fn spawn(groups: Vec<Group>, callback: EventCallback) -> Result<AudioService> {
+pub fn spawn(
+    applications: Vec<Application>,
+    groups: Vec<Group>,
+    callback: EventCallback,
+) -> Result<AudioService> {
     let (sender, receiver) = crossbeam_channel::unbounded();
     let worker_sender = sender.clone();
     thread::Builder::new()
         .name("windows-audio".into())
         .spawn(move || unsafe {
+            exempt_audio_thread_from_throttling();
             if let Err(err) = CoInitializeEx(None, COINIT_MULTITHREADED).ok() {
                 error!(error = %err, "cannot initialize COM");
                 return;
             }
-            match Worker::new(worker_sender, groups, callback) {
+            match Worker::new(worker_sender, applications, groups, callback) {
                 Ok(mut worker) => {
                     worker.run(receiver);
                     worker.shutdown();
@@ -67,11 +72,24 @@ struct Worker {
     endpoint_sink: IMMNotificationClient,
     manager_sink: IAudioSessionNotification,
     sessions: HashMap<String, LiveSession>,
+    applications: HashMap<String, Application>,
+    policy_applied: HashSet<String>,
     groups: Vec<Group>,
     icons: IconCache,
     callback: EventCallback,
     metering_active: bool,
     started: Instant,
+    scene_ramp: Option<SceneRamp>,
+}
+
+struct SceneRamp {
+    started: Instant,
+    next_tick: Instant,
+    duration: Duration,
+    master_target: Option<(f32, f32)>,
+    targets: HashMap<String, (f32, f32)>,
+    mutes: Vec<(String, bool)>,
+    reply: oneshot::Sender<Result<()>>,
 }
 
 struct LiveSession {
@@ -80,12 +98,14 @@ struct LiveSession {
     meter: Option<IAudioMeterInformation>,
     sink: IAudioSessionEvents,
     data: AudioSession,
+    application: Application,
 }
 
 impl Worker {
     unsafe fn new(
         sender: crossbeam_channel::Sender<Command>,
-        groups: Vec<Group>,
+        applications: Vec<Application>,
+        mut groups: Vec<Group>,
         callback: EventCallback,
     ) -> Result<Self> {
         let enumerator: IMMDeviceEnumerator =
@@ -127,11 +147,14 @@ impl Worker {
             endpoint_sink,
             manager_sink,
             sessions: HashMap::new(),
+            applications: deduplicate_applications(applications, &mut groups),
+            policy_applied: HashSet::new(),
             groups,
             icons: IconCache::default(),
             callback,
             metering_active: false,
             started: Instant::now(),
+            scene_ramp: None,
         };
         // Priming runs after the worker owns both sinks. If it fails, `shutdown`
         // can unregister them; returning early instead would leave Windows
@@ -227,7 +250,8 @@ impl Worker {
             executable_name.as_deref(),
         );
         let display = take_pwstr(control.GetDisplayName()?).trim().to_owned();
-        let display_name = if display.is_empty() {
+        let display = resolve_indirect_name(&display).unwrap_or(display);
+        let display_name = if display.is_empty() || (is_system_sounds && display.starts_with('@')) {
             executable_name
                 .as_deref()
                 .and_then(|name| Path::new(name).file_stem())
@@ -249,6 +273,24 @@ impl Worker {
         let icon = executable_path
             .as_ref()
             .and_then(|path| self.icons.icon_for_path(Path::new(path)));
+        let identity_kind = if metadata
+            .as_ref()
+            .and_then(|item| item.aumid.as_ref())
+            .is_some()
+        {
+            IdentityKind::Aumid
+        } else if executable_path.is_some() {
+            IdentityKind::Path
+        } else {
+            IdentityKind::Filename
+        };
+        let mut application =
+            Application::offline(app_key.clone(), identity_kind, display_name.clone());
+        application.executable_name = executable_name;
+        application.executable_path = executable_path;
+        application.icon = icon;
+        application.group_id = group_id;
+        application.is_system_sounds = is_system_sounds;
         // Every fallible read happens before the sink is registered. Registering
         // first would leak the sink into the session control whenever one of
         // these calls failed, because the early return has nothing to unregister
@@ -268,17 +310,14 @@ impl Worker {
                 live_id,
                 app_key,
                 display_name,
-                executable_name,
-                executable_path,
                 process_id,
-                icon,
                 volume,
                 muted,
                 state,
-                is_system_sounds,
                 controllable: true,
-                group_id,
+                peak: 0.0,
             },
+            application,
             control,
             simple,
             meter,
@@ -294,40 +333,161 @@ impl Worker {
                 .UnregisterAudioSessionNotification(&session.sink);
             return;
         }
+        let key = session.data.app_key.clone();
+        let upgraded_from = self.merge_key_for(&session.application);
+        let existed = self.applications.contains_key(&key) || upgraded_from.is_some();
+        if let Some(old_key) = upgraded_from.as_ref() {
+            let persisted = self.applications.remove(old_key).expect("merge key exists");
+            let merged = merge_discovered_application(persisted, &session.application);
+            replace_group_key(&mut self.groups, old_key, &key);
+            self.applications.insert(key.clone(), merged);
+        } else {
+            self.applications
+                .entry(key.clone())
+                .or_insert_with(|| session.application.clone());
+        }
         if emit {
             self.apply_policy(&mut session);
         }
-        let data = session.data.clone();
         self.sessions.insert(live_id, session);
         if emit {
-            (self.callback)(AudioEvent::SessionAdded(data));
+            if let Some(old_key) = upgraded_from {
+                (self.callback)(AudioEvent::ApplicationRemoved { app_key: old_key });
+            }
+            if let Some(app) = self.aggregate(&key) {
+                (self.callback)(if existed {
+                    AudioEvent::ApplicationUpdated(app)
+                } else {
+                    AudioEvent::ApplicationAdded(app)
+                });
+            }
         }
     }
 
-    unsafe fn apply_policy(&self, session: &mut LiveSession) {
-        let policy = audio_policy::policy_for_new_session(audio_policy::group_for(
-            &session.data.app_key,
-            &self.groups,
-        ));
+    fn merge_key_for(&self, discovered: &Application) -> Option<String> {
+        let discovered_path = discovered.executable_path.as_deref()?;
+        let discovered_name = Path::new(discovered_path).file_name()?.to_str()?;
+        let path_collision = self.applications.values().any(|app| {
+            app.identity_kind == IdentityKind::Path
+                && app.executable_path.as_deref().is_some_and(|path| {
+                    !path.eq_ignore_ascii_case(discovered_path)
+                        && Path::new(path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.eq_ignore_ascii_case(discovered_name))
+                })
+        });
+        if path_collision {
+            return None;
+        }
+        self.applications
+            .iter()
+            .find(|(_, app)| {
+                app.identity_kind == IdentityKind::Filename
+                    && app
+                        .executable_name
+                        .as_deref()
+                        .unwrap_or(&app.app_key)
+                        .eq_ignore_ascii_case(discovered_name)
+            })
+            .map(|(key, _)| key.clone())
+    }
+
+    unsafe fn apply_policy(&mut self, session: &mut LiveSession) {
+        let key = session.data.app_key.clone();
+        if let Some(app) = self.applications.get(&key).filter(|app| app.remembered) {
+            if session.simple.SetMute(app.muted, ptr::null()).is_ok() {
+                session.data.muted = app.muted;
+            }
+            if session
+                .simple
+                .SetMasterVolume(app.volume, ptr::null())
+                .is_ok()
+            {
+                session.data.volume = app.volume;
+            }
+            self.policy_applied.insert(key);
+            return;
+        }
+        let policy =
+            audio_policy::policy_for_new_session(audio_policy::group_for(&key, &self.groups));
         if let Some(muted) = policy.muted {
             if session.simple.SetMute(muted, ptr::null()).is_ok() {
                 session.data.muted = muted;
             }
-        } else if let Some(volume) = policy.volume {
+        }
+        if let Some(volume) = policy.volume {
             if session.simple.SetMasterVolume(volume, ptr::null()).is_ok() {
                 session.data.volume = volume;
             }
         }
     }
 
+    fn aggregate(&self, key: &str) -> Option<Application> {
+        let mut app = self.applications.get(key)?.clone();
+        app.sessions = self
+            .sessions
+            .values()
+            .filter(|s| s.data.app_key == key)
+            .map(|s| s.data.clone())
+            .collect();
+        app.running = !app.sessions.is_empty();
+        app.controllable = app.sessions.iter().any(|s| s.controllable);
+        app.peak = app.sessions.iter().map(|s| s.peak).fold(0.0, f32::max);
+        if let Some(first) = app.sessions.first() {
+            let agrees = app
+                .sessions
+                .iter()
+                .all(|s| (s.volume - first.volume).abs() <= 0.0001 && s.muted == first.muted);
+
+            if agrees {
+                // The live sessions are the truth whenever they agree, even
+                // after a policy has been applied. Reporting the stored policy
+                // instead would leave the row showing a stale number after
+                // anything else moved that application: the Windows mixer, a
+                // game's own volume control, or our CLI.
+                app.volume = first.volume;
+                app.muted = first.muted;
+                app.mixed = false;
+            } else {
+                // They disagree. Before a policy exists there is no single true
+                // level, so the row says so rather than inventing an average.
+                // Once one exists it is what the user asked for, and the next
+                // fan-out resynchronizes the stragglers.
+                app.mixed = !self.policy_applied.contains(key);
+            }
+        }
+        Some(app)
+    }
+
     unsafe fn run(&mut self, receiver: crossbeam_channel::Receiver<Command>) {
         let mut next_reconcile = Instant::now() + Duration::from_secs(10);
         let mut next_meter = Instant::now();
         loop {
-            let deadline = next_reconcile.min(next_meter);
+            let next_ramp = self
+                .scene_ramp
+                .as_ref()
+                .map_or(next_reconcile, |ramp| ramp.next_tick);
+            let deadline = next_reconcile.min(next_meter).min(next_ramp);
             match receiver.recv_deadline(deadline) {
                 Ok(Command::Snapshot(reply)) => {
                     let _ = reply.send(self.snapshot());
+                }
+                Ok(Command::SetAppVolume {
+                    app_key,
+                    volume,
+                    reply,
+                }) => {
+                    let result = self.set_app_volume(&app_key, volume);
+                    let _ = reply.send(result);
+                }
+                Ok(Command::SetAppMute {
+                    app_key,
+                    muted,
+                    reply,
+                }) => {
+                    let result = self.set_app_mute(&app_key, muted);
+                    let _ = reply.send(result);
                 }
                 Ok(Command::SetSessionVolume {
                     live_id,
@@ -373,8 +533,29 @@ impl Worker {
                     self.metering_active = active;
                     let _ = reply.send(Ok(()));
                 }
-                Ok(Command::UpdateGroups { groups, reply }) => {
+                Ok(Command::UpdateSettings {
+                    applications,
+                    groups,
+                    reply,
+                }) => {
+                    let mut groups = groups;
+                    self.applications = deduplicate_applications(applications, &mut groups);
                     self.groups = groups;
+                    let _ = reply.send(Ok(()));
+                }
+                Ok(Command::ListOutputDevices(reply)) => {
+                    let result = self.list_output_devices();
+                    let _ = reply.send(result);
+                }
+                Ok(Command::SetDefaultOutput { device_id, reply }) => {
+                    let result = self.set_default_output(&device_id);
+                    let _ = reply.send(result);
+                }
+                Ok(Command::ApplyScene { scene, reply }) => {
+                    self.start_scene(scene, reply);
+                }
+                Ok(Command::EmitEvent { event, reply }) => {
+                    (self.callback)(event);
                     let _ = reply.send(Ok(()));
                 }
                 Ok(Command::AdoptGit(cookie)) => self.adopt_git(cookie),
@@ -396,6 +577,7 @@ impl Worker {
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             }
             let now = Instant::now();
+            self.tick_scene(now);
             if now >= next_meter {
                 self.emit_peaks();
                 next_meter = now
@@ -445,7 +627,10 @@ impl Worker {
                 session.data.display_name = name;
             }
         }
-        (self.callback)(AudioEvent::SessionUpdated(session.data.clone()));
+        let key = session.data.app_key.clone();
+        if let Some(app) = self.aggregate(&key) {
+            (self.callback)(AudioEvent::ApplicationUpdated(app));
+        }
     }
 
     unsafe fn remove_session(&mut self, live_id: &str, emit: bool) {
@@ -454,17 +639,23 @@ impl Worker {
                 .control
                 .UnregisterAudioSessionNotification(&session.sink);
             if emit {
-                (self.callback)(AudioEvent::SessionRemoved {
-                    live_id: live_id.to_owned(),
-                });
+                if let Some(app) = self.aggregate(&session.data.app_key) {
+                    (self.callback)(AudioEvent::ApplicationUpdated(app));
+                }
             }
         }
     }
 
     unsafe fn snapshot(&self) -> Result<MixerSnapshot> {
+        let mut applications: Vec<_> = self
+            .applications
+            .keys()
+            .filter_map(|key| self.aggregate(key))
+            .collect();
+        applications.sort_by_key(|app| (!app.pinned, app.sort_order));
         Ok(MixerSnapshot {
             master: self.master()?,
-            sessions: self.sessions.values().map(|s| s.data.clone()).collect(),
+            applications,
         })
     }
 
@@ -481,6 +672,7 @@ impl Worker {
                 .GetMute()
                 .map_err(|err| self.map_endpoint_error(err))?
                 .as_bool(),
+            peak: self.endpoint_meter.GetPeakValue().unwrap_or(0.0),
         })
     }
 
@@ -497,12 +689,176 @@ impl Worker {
         }
         if let Some(session) = self.sessions.get_mut(id) {
             session.data.controllable = false;
-            (self.callback)(AudioEvent::SessionUpdated(session.data.clone()));
+            let key = session.data.app_key.clone();
+            if let Some(app) = self.aggregate(&key) {
+                (self.callback)(AudioEvent::ApplicationUpdated(app));
+            }
         }
         AudioError::NotControllable
     }
 
+    unsafe fn start_scene(&mut self, scene: Scene, reply: oneshot::Sender<Result<()>>) {
+        if let Some(previous) = self.scene_ramp.take() {
+            let _ = previous.reply.send(Ok(()));
+        }
+        let now = Instant::now();
+        let master_target = scene.master_volume.and_then(|target| {
+            self.endpoint_volume
+                .GetMasterVolumeLevelScalar()
+                .ok()
+                .map(|start| (start, audio_policy::clamp_scalar(target)))
+        });
+        let targets = scene
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                entry.volume.and_then(|target| {
+                    self.aggregate(&entry.app_key).map(|app| {
+                        (
+                            entry.app_key.clone(),
+                            (app.volume, audio_policy::clamp_scalar(target)),
+                        )
+                    })
+                })
+            })
+            .collect();
+        let mutes = scene
+            .entries
+            .into_iter()
+            .filter_map(|entry| entry.muted.map(|muted| (entry.app_key, muted)))
+            .collect();
+        self.scene_ramp = Some(SceneRamp {
+            started: now,
+            next_tick: now,
+            duration: Duration::from_millis(scene.fade_ms as u64),
+            master_target,
+            targets,
+            mutes,
+            reply,
+        });
+        self.tick_scene(now);
+    }
+
+    unsafe fn tick_scene(&mut self, now: Instant) {
+        let Some(ramp) = self.scene_ramp.as_ref() else {
+            return;
+        };
+        if now < ramp.next_tick {
+            return;
+        }
+        let progress = if ramp.duration.is_zero() {
+            1.0
+        } else {
+            (now.duration_since(ramp.started).as_secs_f32() / ramp.duration.as_secs_f32()).min(1.0)
+        };
+        let master_value = ramp
+            .master_target
+            .map(|(start, target)| start + (target - start) * progress);
+        let values: Vec<_> = ramp
+            .targets
+            .iter()
+            .map(|(key, (start, target))| (key.clone(), start + (target - start) * progress))
+            .collect();
+        if let Some(value) = master_value {
+            let _ = self
+                .endpoint_volume
+                .SetMasterVolumeLevelScalar(value, ptr::null());
+        }
+        for (key, value) in values {
+            let _ = self.set_app_volume_internal(&key, value);
+        }
+        if progress >= 1.0 {
+            let ramp = self.scene_ramp.take().expect("ramp exists");
+            for (key, muted) in ramp.mutes {
+                let _ = self.set_app_mute_internal(&key, muted);
+            }
+            let _ = ramp.reply.send(Ok(()));
+        } else if let Some(ramp) = self.scene_ramp.as_mut() {
+            ramp.next_tick = now + Duration::from_millis(16);
+        }
+    }
+
+    unsafe fn set_app_volume(&mut self, key: &str, volume: f32) -> Result<()> {
+        if let Some(ramp) = self.scene_ramp.as_mut() {
+            ramp.targets.remove(key);
+        }
+        self.set_app_volume_internal(key, volume)
+    }
+
+    unsafe fn set_app_volume_internal(&mut self, key: &str, volume: f32) -> Result<()> {
+        if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
+            return Err(AudioError::InvalidVolume);
+        }
+        if !self.applications.contains_key(key) {
+            return Err(AudioError::AppUnknown);
+        }
+        self.policy_applied.insert(key.to_owned());
+        self.applications.get_mut(key).unwrap().volume = volume;
+        let ids: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|(_, s)| s.data.app_key == key)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            if let Some(session) = self.sessions.get_mut(&id) {
+                if session.simple.SetMasterVolume(volume, ptr::null()).is_ok() {
+                    session.data.volume = volume;
+                }
+            }
+        }
+        if let Some(app) = self.aggregate(key) {
+            (self.callback)(AudioEvent::ApplicationUpdated(app));
+        }
+        Ok(())
+    }
+    unsafe fn set_app_mute(&mut self, key: &str, muted: bool) -> Result<()> {
+        if let Some(ramp) = self.scene_ramp.as_mut() {
+            ramp.targets.remove(key);
+            ramp.mutes.retain(|(app_key, _)| app_key != key);
+        }
+        self.set_app_mute_internal(key, muted)
+    }
+
+    unsafe fn set_app_mute_internal(&mut self, key: &str, muted: bool) -> Result<()> {
+        if !self.applications.contains_key(key) {
+            return Err(AudioError::AppUnknown);
+        }
+        self.policy_applied.insert(key.to_owned());
+        self.applications.get_mut(key).unwrap().muted = muted;
+        let ids: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.data.app_key == key)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            let result = self.sessions.get_mut(&id).map(|session| {
+                session
+                    .simple
+                    .SetMute(muted, ptr::null())
+                    .map(|()| session.data.muted = muted)
+            });
+            if let Some(Err(error)) = result {
+                let _ = self.map_session_error(&id, error);
+            }
+        }
+        if let Some(app) = self.aggregate(key) {
+            (self.callback)(AudioEvent::ApplicationUpdated(app));
+        }
+        Ok(())
+    }
+
     unsafe fn set_volume(&mut self, id: &str, volume: f32) -> Result<()> {
+        if let Some(key) = self
+            .sessions
+            .get(id)
+            .map(|session| session.data.app_key.clone())
+        {
+            if let Some(ramp) = self.scene_ramp.as_mut() {
+                ramp.targets.remove(&key);
+            }
+        }
         if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
             return Err(AudioError::InvalidVolume);
         }
@@ -511,46 +867,67 @@ impl Worker {
             return Err(self.map_session_error(id, error));
         }
         session.data.volume = volume;
-        (self.callback)(AudioEvent::SessionUpdated(session.data.clone()));
+        let key = session.data.app_key.clone();
+        if let Some(app) = self.aggregate(&key) {
+            (self.callback)(AudioEvent::ApplicationUpdated(app));
+        }
         Ok(())
     }
 
     unsafe fn set_mute(&mut self, id: &str, muted: bool) -> Result<()> {
+        if let Some(key) = self
+            .sessions
+            .get(id)
+            .map(|session| session.data.app_key.clone())
+        {
+            if let Some(ramp) = self.scene_ramp.as_mut() {
+                ramp.targets.remove(&key);
+                ramp.mutes.retain(|(app_key, _)| app_key != &key);
+            }
+        }
         let session = self.sessions.get_mut(id).ok_or(AudioError::SessionGone)?;
         if let Err(error) = session.simple.SetMute(muted, ptr::null()) {
             return Err(self.map_session_error(id, error));
         }
         session.data.muted = muted;
-        (self.callback)(AudioEvent::SessionUpdated(session.data.clone()));
+        let key = session.data.app_key.clone();
+        if let Some(app) = self.aggregate(&key) {
+            (self.callback)(AudioEvent::ApplicationUpdated(app));
+        }
         Ok(())
     }
 
     unsafe fn emit_peaks(&self) {
-        let master_peak = match self.endpoint_meter.GetPeakValue() {
-            Ok(value) => value,
-            Err(err) if err.code() == AUDCLNT_E_DEVICE_INVALIDATED => {
-                let _ = self.sender.send(Command::RebuildEndpoint);
-                return;
-            }
-            Err(_) => 0.0,
-        };
+        let master_peak = self.endpoint_meter.GetPeakValue().unwrap_or(0.0);
+        let applications = self
+            .applications
+            .keys()
+            .filter_map(|key| {
+                let sessions: Vec<_> = self
+                    .sessions
+                    .values()
+                    .filter(|s| s.data.app_key == *key)
+                    .filter_map(|s| {
+                        s.meter
+                            .as_ref()
+                            .and_then(|m| m.GetPeakValue().ok())
+                            .map(|peak| SessionPeak {
+                                live_id: s.data.live_id.clone(),
+                                peak,
+                            })
+                    })
+                    .collect();
+                (!sessions.is_empty()).then(|| AppPeak {
+                    app_key: key.clone(),
+                    peak: sessions.iter().map(|s| s.peak).fold(0.0, f32::max),
+                    sessions,
+                })
+            })
+            .collect();
         (self.callback)(AudioEvent::Peaks(PeakBatch {
             timestamp_ms: self.started.elapsed().as_millis() as u64,
             master_peak,
-            sessions: self
-                .sessions
-                .values()
-                .filter_map(|session| {
-                    session
-                        .meter
-                        .as_ref()
-                        .and_then(|meter| meter.GetPeakValue().ok())
-                        .map(|peak| SessionPeak {
-                            live_id: session.data.live_id.clone(),
-                            peak,
-                        })
-                })
-                .collect(),
+            applications,
         }));
     }
 
@@ -623,6 +1000,30 @@ impl Worker {
         let _ = self
             .enumerator
             .UnregisterEndpointNotificationCallback(&self.endpoint_sink);
+    }
+
+    unsafe fn list_output_devices(&self) -> Result<Vec<AudioDevice>> {
+        let collection = self
+            .enumerator
+            .EnumAudioEndpoints(eRender, windows::Win32::Media::Audio::DEVICE_STATE_ACTIVE)
+            .map_err(winerr)?;
+        let count = collection.GetCount().map_err(winerr)?;
+        let mut devices = Vec::new();
+        for index in 0..count {
+            let device = collection.Item(index).map_err(winerr)?;
+            let id = take_pwstr(device.GetId().map_err(winerr)?);
+            devices.push(AudioDevice {
+                name: endpoint_friendly_name(&device).unwrap_or_else(|_| id.clone()),
+                is_default: id == self.endpoint_id,
+                id,
+            });
+        }
+        Ok(devices)
+    }
+    unsafe fn set_default_output(&mut self, _device_id: &str) -> Result<()> {
+        Err(AudioError::Unsupported(
+            "Windows policy configuration interface is unavailable".into(),
+        ))
     }
 
     fn map_endpoint_error(&self, err: windows::core::Error) -> AudioError {
@@ -799,6 +1200,49 @@ impl IAudioSessionEvents_Impl for SessionSink_Impl {
             .send(Command::SessionRemoved(self.live_id.clone()));
         Ok(())
     }
+}
+
+unsafe fn exempt_audio_thread_from_throttling() {
+    use windows::Win32::System::Threading::{
+        GetCurrentThread, SetThreadInformation, ThreadPowerThrottling,
+        THREAD_POWER_THROTTLING_CURRENT_VERSION, THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+        THREAD_POWER_THROTTLING_STATE,
+    };
+    let state = THREAD_POWER_THROTTLING_STATE {
+        Version: THREAD_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask: 0,
+    };
+    if let Err(error) = SetThreadInformation(
+        GetCurrentThread(),
+        ThreadPowerThrottling,
+        &state as *const _ as *const _,
+        std::mem::size_of_val(&state) as u32,
+    ) {
+        warn!(%error, "cannot exempt audio worker from power throttling");
+    }
+}
+
+fn resolve_indirect_name(value: &str) -> Option<String> {
+    if !value.starts_with('@') {
+        return None;
+    }
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::UI::Shell::SHLoadIndirectString;
+    let wide: Vec<u16> = std::ffi::OsStr::new(value)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let mut output = vec![0u16; 1024];
+    unsafe {
+        SHLoadIndirectString(PCWSTR(wide.as_ptr()), &mut output, None).ok()?;
+    }
+    let end = output
+        .iter()
+        .position(|ch| *ch == 0)
+        .unwrap_or(output.len());
+    let text = String::from_utf16_lossy(&output[..end]);
+    (!text.trim().is_empty()).then_some(text)
 }
 
 fn map_state(state: AudioSessionState) -> SessionState {

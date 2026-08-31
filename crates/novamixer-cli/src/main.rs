@@ -1,18 +1,23 @@
 use clap::{Parser, Subcommand};
 use novamixer_application::NovaMixerApplication;
 use serde::Serialize;
+use std::time::Duration;
+
+mod efficiency;
 
 #[derive(Parser)]
 struct Cli {
+    #[arg(long, hide = true, value_parser = ["on", "off"])]
+    efficiency: Option<String>,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 #[derive(Subcommand)]
 enum Command {
     Doctor {
         #[arg(long)]
         json: bool,
-        #[arg(long, value_names = ["APP_KEY", "SCALAR"], num_args = 2)]
+        #[arg(long,value_names=["APP_KEY","SCALAR"],num_args=2)]
         set_volume: Option<Vec<String>>,
         #[arg(long)]
         watch: bool,
@@ -23,110 +28,113 @@ struct Doctor {
     data_root: String,
     migration_ran: bool,
     default_endpoint_name: String,
+    application_count: usize,
     live_session_count: usize,
-    sessions: Vec<Session>,
+    applications: Vec<App>,
     loaded_group_count: usize,
 }
 #[derive(Serialize)]
-struct Session {
+struct App {
     app_key: String,
+    display_name: String,
     volume: f32,
-    state: String,
+    running: bool,
+    session_count: usize,
     controllable: bool,
 }
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
-    match cli.command {
+    if let Some(mode) = cli.efficiency {
+        let proof = efficiency::apply(mode == "on")?;
+        println!("GetPriorityClass: 0x{:08X}", proof.priority_class);
+        println!(
+            "GetProcessInformation(ProcessPowerThrottling).StateMask: 0x{:08X}",
+            proof.ecoqos_state_mask
+        );
+        println!("Low base priority: {}", proof.low_priority);
+        println!("EcoQoS execution-speed throttling: {}", proof.ecoqos);
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        return Ok(());
+    }
+    match cli.command.unwrap_or(Command::Doctor {
+        json: false,
+        set_volume: None,
+        watch: false,
+    }) {
         Command::Doctor {
             json,
             set_volume,
             watch,
         } => {
-            let started = std::sync::Arc::new(std::sync::Mutex::new(None::<std::time::Instant>));
-            let event_clock = started.clone();
             let app = NovaMixerApplication::start(move |event| {
                 if watch {
-                    let elapsed = event_clock
-                        .lock()
-                        .ok()
-                        .and_then(|value| value.as_ref().map(std::time::Instant::elapsed))
-                        .map_or(0, |value| value.as_millis());
                     match event {
-                        audio_sessions::AudioEvent::SessionAdded(session) => eprintln!(
-                            "event +{}ms session-added {} volume={:.3}",
-                            elapsed, session.app_key, session.volume
+                        audio_sessions::AudioEvent::ApplicationAdded(a) => eprintln!(
+                            "application-added {} sessions={}",
+                            a.app_key,
+                            a.sessions.len()
                         ),
-                        audio_sessions::AudioEvent::SessionUpdated(session) => eprintln!(
-                            "event +{}ms session-updated {} volume={:.3}",
-                            elapsed, session.app_key, session.volume
+                        audio_sessions::AudioEvent::ApplicationUpdated(a) => eprintln!(
+                            "application-updated {} sessions={}",
+                            a.app_key,
+                            a.sessions.len()
                         ),
-                        audio_sessions::AudioEvent::SessionRemoved { live_id } => {
-                            eprintln!("event +{}ms session-removed {}", elapsed, live_id)
+                        audio_sessions::AudioEvent::ApplicationRemoved { app_key } => {
+                            eprintln!("application-removed {app_key}")
                         }
                         _ => {}
                     }
                 }
             })?;
-            let mut snapshot = app.snapshot().await?;
             if let Some(args) = set_volume {
-                let scalar: f32 = args[1].parse()?;
-                for session in snapshot
-                    .sessions
-                    .iter()
-                    .filter(|session| session.app_key.eq_ignore_ascii_case(&args[0]))
-                {
-                    app.audio
-                        .set_session_volume(session.live_id.clone(), scalar)
-                        .await?;
-                }
-                snapshot = app.snapshot().await?;
+                app.set_app_volume(&args[0], args[1].parse()?).await?
             }
+            let snapshot = app.snapshot().await?;
+            let live = snapshot.applications.iter().map(|a| a.sessions.len()).sum();
             let report = Doctor {
                 data_root: app.data_root().display().to_string(),
                 migration_ran: app.migration_ran(),
                 default_endpoint_name: snapshot.master.endpoint_name,
-                live_session_count: snapshot.sessions.len(),
-                sessions: snapshot
-                    .sessions
+                application_count: snapshot.applications.len(),
+                live_session_count: live,
+                applications: snapshot
+                    .applications
                     .into_iter()
-                    .map(|value| Session {
-                        app_key: value.app_key,
-                        volume: value.volume,
-                        state: format!("{:?}", value.state).to_lowercase(),
-                        controllable: value.controllable,
+                    .map(|a| App {
+                        app_key: a.app_key,
+                        display_name: a.display_name,
+                        volume: a.volume,
+                        running: a.running,
+                        session_count: a.sessions.len(),
+                        controllable: a.controllable,
                     })
                     .collect(),
                 loaded_group_count: app.settings().groups.len(),
             };
             if json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                println!("{}", serde_json::to_string_pretty(&report)?)
             } else {
-                println!(
-                    "Data root: {}\nMigration ran: {}\nDefault endpoint: {}\nLive sessions: {}",
-                    report.data_root,
-                    report.migration_ran,
-                    report.default_endpoint_name,
-                    report.live_session_count
-                );
-                for session in report.sessions {
+                println!("Data root: {}\nMigration ran: {}\nDefault endpoint: {}\nApplications: {}\nLive sessions: {}",report.data_root,report.migration_ran,report.default_endpoint_name,report.application_count,report.live_session_count);
+                for a in report.applications {
                     println!(
-                        "  {} volume={:.3} state={} controllable={}",
-                        session.app_key, session.volume, session.state, session.controllable
-                    );
+                        "  {} ({}) volume={:.3} running={} sessions={} controllable={}",
+                        a.display_name,
+                        a.app_key,
+                        a.volume,
+                        a.running,
+                        a.session_count,
+                        a.controllable
+                    )
                 }
-                println!("Loaded groups: {}", report.loaded_group_count);
+                println!("Loaded groups: {}", report.loaded_group_count)
             }
             if watch {
-                if let Ok(mut value) = started.lock() {
-                    *value = Some(std::time::Instant::now());
-                }
                 eprintln!("Watching Core Audio callbacks. Press Ctrl+C to stop.");
-                tokio::signal::ctrl_c().await?;
+                tokio::signal::ctrl_c().await?
             }
         }
     }

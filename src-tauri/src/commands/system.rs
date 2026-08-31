@@ -2,7 +2,29 @@ use crate::{
     error::{AppError, AppResult},
     state::AppState,
 };
+use novamixer_contracts::EfficiencyStatus;
 use tauri::{Manager, State};
+#[tauri::command]
+pub async fn set_efficiency_mode(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> AppResult<EfficiencyStatus> {
+    let status = crate::efficiency::set(enabled);
+    if status.enabled == enabled {
+        let mut settings = state.application.settings();
+        settings.efficiency_mode = enabled;
+        state
+            .application
+            .save_settings(settings)
+            .await
+            .map_err(|e| AppError::Other(e.to_string()))?;
+    }
+    Ok(status)
+}
+#[tauri::command]
+pub fn get_efficiency_status() -> EfficiencyStatus {
+    crate::efficiency::get()
+}
 #[tauri::command]
 pub fn open_data_folder(state: State<'_, AppState>) -> AppResult<()> {
     std::process::Command::new("explorer.exe")
