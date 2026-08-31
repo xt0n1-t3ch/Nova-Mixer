@@ -23,10 +23,10 @@ pub fn run() {
     let _log_guard = logging::init();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            // Reuse the tray restore path: `show()` alone does not move a
+            // minimized Windows window back from its off-screen sentinel
+            // coordinates (`-32000,-32000`).
+            desktop::show_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

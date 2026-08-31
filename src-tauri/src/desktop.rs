@@ -245,10 +245,31 @@ fn toggle_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-fn show_window<R: Runtime>(app: &AppHandle<R>) {
+pub(crate) fn show_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
+
+        #[cfg(windows)]
+        if let Ok(tauri_hwnd) = window.hwnd() {
+            use windows::Win32::{
+                Foundation::HWND,
+                UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_RESTORE},
+            };
+            // Tauri and the backend currently resolve different `windows`
+            // crate versions. The handle itself is the same Win32 pointer, so
+            // reconstruct the local wrapper instead of crossing crate types.
+            let hwnd = HWND(tauri_hwnd.0);
+            // Tauri's `unminimize()` can leave a hidden-start Windows window at
+            // the shell sentinel coordinates (-32000,-32000). SW_RESTORE moves
+            // it back onto its saved monitor; SetForegroundWindow completes the
+            // explicit user action from the tray or a second invocation.
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
+
         let _ = window.set_focus();
     }
 }
