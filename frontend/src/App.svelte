@@ -3,8 +3,8 @@
   import { fly } from "svelte/transition";
   import type { Theme } from "./lib/api";
   import { setMeteringActive } from "./lib/api";
-  import Sidebar from "./components/Sidebar.svelte";
-  import TopBar from "./components/TopBar.svelte";
+  import CommandRail from "./components/CommandRail.svelte";
+  import ChromeBar from "./components/ChromeBar.svelte";
   import Toast from "./components/Toast.svelte";
   import ShortcutOverlay from "./components/ShortcutOverlay.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
@@ -59,9 +59,38 @@
   }
 
   let density = $derived($settings?.ui_prefs.density ?? "comfy");
+  let forcedRailCollapse = $state(false);
+  let railExpanded = $derived(
+    !($settings?.ui_prefs.sidebar_collapsed ?? false) && !forcedRailCollapse,
+  );
 
   $effect(() => {
     document.documentElement.setAttribute("data-density", density);
+  });
+
+  function toggleRail(): void {
+    const current = $settings;
+    if (!current || forcedRailCollapse) return;
+    persistSettings({
+      ...current,
+      ui_prefs: {
+        ...current.ui_prefs,
+        sidebar_collapsed: !current.ui_prefs.sidebar_collapsed,
+      },
+    });
+  }
+
+  // At the enforced minimum width labels would consume the fader's working
+  // room. The responsive collapse is presentation-only: it never overwrites the
+  // user's saved preference, which returns when the window grows again.
+  onMount(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const sync = (): void => {
+      forcedRailCollapse = media.matches;
+    };
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
   });
 
   onMount(() => {
@@ -190,31 +219,51 @@
   });
 </script>
 
-<div class="app-shell">
+<div class="app-shell" class:rail-expanded={railExpanded}>
   <div class="app-ambient" aria-hidden="true">
     <div class="ambient-mesh"></div>
     <div class="ambient-grain"></div>
   </div>
 
-  <Sidebar />
-  <TopBar onToggleTheme={toggleTheme} {theme} />
+  <CommandRail
+    onToggleTheme={toggleTheme}
+    {theme}
+    expanded={railExpanded}
+    forcedCollapsed={forcedRailCollapse}
+    onToggleExpanded={toggleRail}
+  />
+  <ChromeBar />
 
   <main class="app-main">
-    <div class="main-inner">
+    <div class="main-inner" class:is-desk={$currentView === "applications"}>
       {#if $currentView === "applications"}
-        <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-applications">
+        <!-- The mixer desk owns its own scrolling and full width; it is not a
+             page centred in a content column. -->
+        <div class="view-fade" data-testid="view-applications">
           <Applications />
         </div>
       {:else if $currentView === "groups"}
-        <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-groups">
+        <div
+          class="view-pane"
+          in:fly={{ y: 8, duration: motionDuration(200) }}
+          data-testid="view-groups"
+        >
           <Groups />
         </div>
       {:else if $currentView === "settings"}
-        <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-settings">
+        <div
+          class="view-pane"
+          in:fly={{ y: 8, duration: motionDuration(200) }}
+          data-testid="view-settings"
+        >
           <Settings onSetTheme={applyTheme} currentTheme={theme} />
         </div>
       {:else if $currentView === "about"}
-        <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-about">
+        <div
+          class="view-pane"
+          in:fly={{ y: 8, duration: motionDuration(200) }}
+          data-testid="view-about"
+        >
           <About />
         </div>
       {/if}
@@ -232,17 +281,21 @@
     inset: 0;
     z-index: 1;
     display: grid;
-    grid-template-rows: var(--topbar-height) 1fr;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: var(--chrome-height) 1fr;
+    grid-template-columns: var(--rail-width) minmax(0, 1fr);
     overflow: hidden;
     background: transparent;
+    transition: grid-template-columns var(--dur-normal) var(--ease-emphasized);
   }
-  .app-shell :global(.sidebar) {
+  .app-shell.rail-expanded {
+    grid-template-columns: var(--rail-width-expanded) minmax(0, 1fr);
+  }
+  .app-shell :global(.rail) {
     grid-row: 1 / -1;
     grid-column: 1;
     z-index: 70;
   }
-  .app-shell :global(.topbar) {
+  .app-shell :global(.chrome) {
     grid-row: 1;
     grid-column: 2;
     position: relative;
@@ -295,14 +348,69 @@
     position: relative;
     z-index: 1;
     min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Secondary screens are documents and keep a padded, centred column. The
+     mixer desk is not: it fills the frame edge to edge and manages its own
+     scrolling, so the master deck can span the console.
+     
+     The height chain matters: each wrapper passes its height down, otherwise a
+     view asking for `min-height: 100%` measures against an auto-sized parent
+     and collapses to its content, leaving a dead band under the last card. */
+  .main-inner {
+    flex: 1;
+    min-height: 0;
+    max-width: var(--content-max);
+    width: 100%;
+    margin: 0 auto;
+    padding: clamp(18px, 2.4vw, 32px) clamp(18px, 3vw, 40px) clamp(24px, 3vw, 40px);
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
+    display: flex;
+    flex-direction: column;
   }
-  .main-inner {
-    max-width: var(--content-max);
-    padding: clamp(18px, 2.4vw, 32px) clamp(18px, 3vw, 40px) clamp(24px, 3vw, 40px);
-    margin: 0 auto;
+  /* The wrapper must be a flex column itself, not merely stretched: a stretched
+     block still sizes its child to content, which is what left a dead band
+     under the last card on every secondary screen. */
+  .view-pane,
+  .view-fade {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .view-pane > :global(*),
+  .view-fade > :global(*) {
+    flex: 1;
+    min-height: 0;
+  }
+  .main-inner.is-desk {
+    max-width: none;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  /* Peer views crossfade rather than each flying in from the same offset, which
+     read as four copies of one page. */
+  .view-fade {
+    animation: view-fade var(--dur-fast) var(--ease-out);
+  }
+  @keyframes view-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .view-fade {
+      animation: none;
+    }
   }
 
   @media (max-width: 720px) {

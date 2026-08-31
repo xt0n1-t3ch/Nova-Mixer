@@ -21,7 +21,8 @@ const outDir = path.resolve(repoRoot, process.argv[2] ?? ".preview");
 
 const PORT = 1425;
 const BASE = `http://localhost:${PORT}/preview.html`;
-const VIEWPORT = { width: 1280, height: 800 };
+const WIDE = { width: 1440, height: 900 };
+const NARROW = { width: 860, height: 620 };
 
 const MATRIX = [
   { view: "applications", theme: "dark", lang: "en" },
@@ -32,6 +33,9 @@ const MATRIX = [
   { view: "settings", theme: "light", lang: "en" },
   { view: "about", theme: "dark", lang: "en" },
   { view: "applications", theme: "dark", lang: "es" },
+  // At the window's own minimum, to prove nothing truncates to initials there.
+  { view: "applications", theme: "dark", lang: "en", size: "narrow" },
+  { view: "settings", theme: "dark", lang: "en", size: "narrow" },
 ];
 
 function startVite() {
@@ -73,19 +77,21 @@ async function main() {
   const errors = [];
 
   try {
-    const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2 });
+    const page = await browser.newPage({ viewport: WIDE, deviceScaleFactor: 2 });
     page.on("console", (message) => {
       if (message.type() === "error") errors.push(message.text());
     });
     page.on("pageerror", (error) => errors.push(error.message));
 
     for (const entry of MATRIX) {
-      const query = new URLSearchParams(entry).toString();
+      const { size, ...params } = entry;
+      await page.setViewportSize(size === "narrow" ? NARROW : WIDE);
+      const query = new URLSearchParams(params).toString();
       await page.goto(`${BASE}?${query}`, { waitUntil: "networkidle" });
       // Let fonts settle and the entry transitions finish before capturing.
       await page.waitForTimeout(700);
 
-      const name = `${entry.view}-${entry.theme}${entry.lang === "es" ? "-es" : ""}.png`;
+      const name = `${entry.view}-${entry.theme}${entry.lang === "es" ? "-es" : ""}${size ? `-${size}` : ""}.png`;
       await page.screenshot({ path: path.join(outDir, name) });
       process.stdout.write(`captured ${name}\n`);
     }

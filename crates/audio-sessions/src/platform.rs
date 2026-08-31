@@ -251,21 +251,19 @@ impl Worker {
         );
         let display = take_pwstr(control.GetDisplayName()?).trim().to_owned();
         let display = resolve_indirect_name(&display).unwrap_or(display);
-        let display_name = if display.is_empty() || (is_system_sounds && display.starts_with('@')) {
-            executable_name
-                .as_deref()
-                .and_then(|name| Path::new(name).file_stem())
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| {
-                    if is_system_sounds {
-                        "System Sounds".into()
-                    } else {
-                        app_key.clone()
-                    }
-                })
-        } else {
-            display
-        };
+        let session_name = (!(display.is_empty() || is_system_sounds && display.starts_with('@')))
+            .then_some(display);
+        let display_name = metadata
+            .as_ref()
+            .and_then(|item| item.version_name.clone())
+            .or(session_name)
+            .unwrap_or_else(|| {
+                if is_system_sounds {
+                    "System Sounds".into()
+                } else {
+                    app_icons::fallback_name(executable_name.as_deref().unwrap_or(&app_key))
+                }
+            });
         let simple: ISimpleAudioVolume = control.cast()?;
         let meter = control.cast().ok();
         let group_id =

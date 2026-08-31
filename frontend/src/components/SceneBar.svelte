@@ -143,16 +143,18 @@
 {/if}
 
 <style>
+  /* A transport belt across the console, not a card: scenes are operational
+     controls that sit between the master and the channels. */
   .scene-bar {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-3);
-    flex-wrap: wrap;
-    padding: var(--space-2) var(--space-3);
-    margin-bottom: var(--space-4);
-    border-radius: var(--radius-lg);
+    min-height: var(--scene-belt-height);
+    padding: 0 var(--space-4);
     background: var(--bg-cap);
-    border: 1px solid var(--border);
+    border-bottom: 1px solid var(--deck-line);
+    overflow: hidden;
   }
 
   .scene-label {
@@ -174,16 +176,21 @@
     min-width: 0;
   }
 
+  /* Scenes overflow horizontally rather than wrapping into a second belt,
+     which would push the channels down as the list grows. */
   .scene-list {
     display: flex;
-    flex-wrap: wrap;
     gap: var(--space-1);
     list-style: none;
     margin: 0;
     padding: 0;
-    flex: 1;
     min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
   }
+  .scene-list::-webkit-scrollbar { display: none; }
 
   /* Apply and delete are one visual pill but two targets, so a mis-click
      cannot destroy a scene the user meant to run. */

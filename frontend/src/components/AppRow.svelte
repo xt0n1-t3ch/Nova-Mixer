@@ -186,7 +186,7 @@
 
     <div class="row-actions">
       <button
-        class="icon-btn icon-btn-sm"
+        class="icon-btn icon-btn-sm pin-action"
         class:is-on={app.pinned}
         onclick={onTogglePin}
         aria-pressed={app.pinned}
@@ -226,43 +226,44 @@
 
 <style>
   .app-block {
-    border-radius: var(--radius-lg);
+    border-bottom: 1px solid var(--deck-line);
+  }
+  .app-block:last-child {
+    border-bottom: none;
   }
 
-  /* Columns: lead | meter | fader | readout | mute | actions.
-     Only the fader flexes, so every readout and button lines up down the list. */
+  /* A channel on a console, not a card in a list: rows sit on one continuous
+     surface divided by rules, so the eye tracks a column of faders instead of
+     re-reading a border around every application.
+
+     Columns: lead | meter | fader | readout | mute | actions. Only the fader
+     flexes, so every readout and button lines up down the whole desk. The lead
+     has a 168px floor because below that an application name truncates to
+     initials, which is what made the first version unreadable when narrow. */
   .app-row {
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) auto minmax(120px, 2fr) 48px 32px auto;
+    grid-template-columns: minmax(168px, 1.1fr) 40px minmax(140px, 2fr) 48px 32px 60px;
     align-items: center;
     gap: var(--space-3);
     height: var(--row-height);
-    padding: 0 var(--space-3) 0 var(--space-2);
-    border-radius: var(--radius-lg);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
+    padding: 0 var(--space-4) 0 var(--space-2);
+    border-left: 2px solid transparent;
     transition:
       background var(--dur-fast) var(--ease),
       border-color var(--dur-fast) var(--ease),
       opacity var(--dur-normal) var(--ease);
   }
   .app-row:hover {
-    background: var(--bg-card-hover);
-    border-color: var(--border-hover);
+    background: var(--channel-hover);
   }
   .app-row.is-inspected {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    background: var(--channel-selected);
+    border-left-color: var(--accent);
   }
 
   .app-row.is-compact {
-    grid-template-columns: minmax(0, 1fr) auto minmax(110px, 2fr) 44px 32px auto;
+    grid-template-columns: minmax(150px, 1fr) 36px minmax(130px, 2fr) 44px 32px 60px;
     gap: var(--space-2);
-  }
-
-  .is-expanded .app-row {
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
   }
 
   /* An offline application keeps its settings reachable, so it stays listed but
@@ -388,17 +389,32 @@
     gap: 1px;
     list-style: none;
     margin: 0;
-    padding: var(--space-1) var(--space-2) var(--space-2) 30px;
+    padding: var(--space-1) var(--space-4) var(--space-2) 34px;
     background: var(--bg-cap);
-    border: 1px solid var(--border);
-    border-top: none;
-    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    border-top: 1px solid var(--deck-line);
   }
 
-  @media (max-width: 700px) {
+  /* Narrowing sheds affordances, never facts. The pin goes first because it
+     still lives in the inspector; the meter goes next because the percentage
+     already reports the level. The name, its secondary line, the fader, the
+     percentage and mute all stay: "In Main" and "2 streams" are the reason the
+     row is worth reading, and dropping them was what made the earlier narrow
+     layout feel merely squeezed. */
+  @media (max-width: 900px) {
     .app-row,
     .app-row.is-compact {
-      grid-template-columns: minmax(0, 1fr) minmax(90px, 1.6fr) 44px 32px auto;
+      grid-template-columns: minmax(150px, 1fr) 36px minmax(120px, 1.8fr) 44px 32px 30px;
+    }
+    .row-actions :global(.pin-action) {
+      display: none;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .app-row,
+    .app-row.is-compact {
+      grid-template-columns: minmax(140px, 1fr) minmax(110px, 1.6fr) 42px 32px 30px;
+      padding-right: var(--space-3);
     }
     .row-meter {
       display: none;

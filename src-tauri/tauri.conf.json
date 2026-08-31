@@ -10,7 +10,7 @@
     "frontendDist": "../frontend/dist"
   },
   "app": {
-    "windows": [{ "title": "NovaMixer", "width": 1080, "height": 720, "minWidth": 860, "minHeight": 560, "resizable": true, "decorations": false, "transparent": false, "shadow": true, "center": true, "label": "main" }],
+    "windows": [{ "title": "NovaMixer", "width": 1080, "height": 720, "minWidth": 860, "minHeight": 600, "resizable": true, "decorations": false, "transparent": false, "shadow": true, "center": true, "label": "main" }],
     "security": { "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost" }
   },
   "bundle": {

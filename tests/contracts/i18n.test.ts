@@ -90,9 +90,10 @@ describe("source usage", () => {
   const sources = [
     "App.svelte",
     "components/AppRow.svelte",
-    "components/MasterStrip.svelte",
-    "components/Sidebar.svelte",
-    "components/TopBar.svelte",
+    "components/MasterDeck.svelte",
+    "components/StatusRail.svelte",
+    "components/CommandRail.svelte",
+    "components/ChromeBar.svelte",
     "components/Dialog.svelte",
     "components/AddAppDialog.svelte",
     "components/AppInspector.svelte",

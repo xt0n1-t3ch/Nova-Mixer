@@ -127,12 +127,8 @@
       <h1 class="view-title">{$t("view.groups.title")}</h1>
       <p class="view-subtitle">{$t("view.groups.subtitle")}</p>
     </div>
-    <div class="header-actions">
-      <button class="btn btn-primary" onclick={() => (nameDialog = { mode: "create", value: "" })}>
-        <Plus size={14} />
-        {$t("groups.new")}
-      </button>
-    </div>
+    <!-- Creating a group lives at the end of the bank, where the list makes it
+         obvious what is being added to. -->
   </div>
 
   {#if $groups.length === 0}
@@ -146,23 +142,39 @@
     </EmptyState>
   {:else}
     <div class="groups-layout">
-      <div class="groups-list">
-        {#each $groups as group (group.id)}
-          <GroupCard
-            {group}
-            memberCount={group.app_keys.length}
-            isActive={group.id === $activeGroupId}
-            isSelected={group.id === selected?.id}
-            {canDelete}
-            onSelect={() => {
-              selectedGroupId.set(group.id);
-              draftVolume = null;
-            }}
-            onRename={() =>
-              (nameDialog = { mode: "rename", value: group.name, groupId: group.id })}
-            onDelete={() => (deleteTarget = group)}
-          />
-        {/each}
+      <!-- A bank of groups, labelled like the mixer's own column legend, so
+           this screen belongs to the same console as the desk. -->
+      <div class="groups-bank">
+        <div class="bank-head">
+          <span class="bank-label">{$t("groups.bank")}</span>
+          <span class="bank-rule" aria-hidden="true"></span>
+          <span class="bank-count mono">{$groups.length}</span>
+        </div>
+        <div class="groups-list">
+          {#each $groups as group (group.id)}
+            <GroupCard
+              {group}
+              memberCount={group.app_keys.length}
+              isActive={group.id === $activeGroupId}
+              isSelected={group.id === selected?.id}
+              {canDelete}
+              onSelect={() => {
+                selectedGroupId.set(group.id);
+                draftVolume = null;
+              }}
+              onRename={() =>
+                (nameDialog = { mode: "rename", value: group.name, groupId: group.id })}
+              onDelete={() => (deleteTarget = group)}
+            />
+          {/each}
+        </div>
+        <button
+          class="bank-add"
+          onclick={() => (nameDialog = { mode: "create", value: "" })}
+        >
+          <Plus size={14} />
+          {$t("groups.new")}
+        </button>
       </div>
 
       {#if selected}
@@ -414,17 +426,92 @@
 {/if}
 
 <style>
-  .groups-layout {
-    display: grid;
-    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
-    gap: var(--space-4);
-    align-items: start;
+  /* The view is a flex column so the layout below it can claim the remaining
+     height; without this the grid measures against an auto-sized parent and
+     collapses to its content. */
+  .view {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
+  .groups-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 284px) minmax(0, 1fr);
+    gap: var(--space-4);
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* The bank fills its column and keeps its own header and footer, so a short
+     list no longer leaves most of the left side blank. */
+  .groups-bank {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding-right: var(--space-4);
+    border-right: 1px solid var(--border);
+  }
+  .bank-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .bank-label {
+    font-size: var(--fs-2xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: var(--letter-wider);
+    color: var(--text-muted);
+  }
+  .bank-rule {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .bank-count {
+    font-size: var(--fs-2xs);
+    font-weight: 700;
+    color: var(--text-placeholder);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The add slot follows the last card immediately rather than being pushed to
+     the bottom of the column, so a short list reads as a list with room after
+     it instead of two clusters with a void between them. */
   .groups-list {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
+  }
+
+  /* A dashed slot at the end of the bank reads as "there is room for another
+     one" far better than a button in a page header. */
+  .bank-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    height: 44px;
+    border-radius: var(--radius-lg);
+    border: 1px dashed var(--border-strong);
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    transition:
+      color var(--dur-fast) var(--ease),
+      border-color var(--dur-fast) var(--ease),
+      background var(--dur-fast) var(--ease);
+  }
+  .bank-add:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .bank-add:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-ring);
   }
 
   .group-detail {
@@ -432,6 +519,11 @@
     flex-direction: column;
     gap: var(--space-4);
     min-width: 0;
+  }
+  /* The behaviour panel takes the remaining height so the detail column reaches
+     the frame rather than ending two thirds down. */
+  .group-detail > .surface:last-child {
+    flex: 1;
   }
 
   .detail-head {

@@ -183,11 +183,26 @@
   --dur-slow: 360ms;
   --dur-stagger: 12ms;
 
-  /* Shell ---------------------------------------------------------------- */
-  --sidebar-width: 232px;
-  --sidebar-width-collapsed: 64px;
-  --topbar-height: 52px;
-  --content-max: 1400px;
+  /* Shell ----------------------------------------------------------------
+     A mixing console, not a documents app: a narrow instrument rail instead of
+     a wide navigation sidebar, a thin chrome strip instead of a toolbar, and a
+     master deck that spans the desk rather than sitting in a card. */
+  --rail-width: 64px;
+  --rail-width-expanded: 208px;
+  --chrome-height: 44px;
+  --master-deck-height: 184px;
+  --scene-belt-height: 44px;
+  --inspector-width: 320px;
+  --inspector-overlay-width: 360px;
+  --content-max: 1600px;
+
+  /* Console surfaces: the deck reads as one continuous instrument, so its
+     divisions are ruled lines rather than gaps between floating cards. */
+  --deck-bg: #08080a;
+  --deck-line: rgba(255, 255, 255, 0.06);
+  --deck-line-strong: rgba(255, 255, 255, 0.12);
+  --channel-hover: rgba(255, 255, 255, 0.028);
+  --channel-selected: rgba(233, 235, 239, 0.06);
 
   /* Glass — reserved for floating chrome, never for content cards --------- */
   --glass-1: rgba(10, 11, 14, 0.5);
@@ -311,6 +326,12 @@
 
   --scrollbar-thumb: rgba(0, 0, 0, 0.16);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.26);
+
+  --deck-bg: #fbfbfd;
+  --deck-line: rgba(15, 23, 42, 0.08);
+  --deck-line-strong: rgba(15, 23, 42, 0.16);
+  --channel-hover: rgba(15, 23, 42, 0.03);
+  --channel-selected: rgba(20, 22, 28, 0.05);
 }
 
 /* ── Density ───────────────────────────────────────────────────────────────

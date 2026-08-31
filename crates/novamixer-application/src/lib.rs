@@ -35,7 +35,10 @@ pub struct NovaMixerApplication {
 impl NovaMixerApplication {
     pub fn start(callback: impl Fn(AudioEvent) + Send + Sync + 'static) -> Result<Self> {
         let store = SettingsStore::discover()?;
-        let report = store.load();
+        let mut report = store.load();
+        if enrich_applications(&mut report.settings.applications, store.data_root()) {
+            store.save(&report.settings)?;
+        }
         let audio = AudioService::start(
             report.settings.applications.clone(),
             report.settings.groups.clone(),
@@ -62,6 +65,7 @@ impl NovaMixerApplication {
     }
     pub async fn save_settings(&self, mut settings: AppSettings) -> Result<()> {
         settings.validate();
+        enrich_applications(&mut settings.applications, self.store.data_root());
         self.store.save(&settings)?;
         self.audio
             .update_settings(settings.applications.clone(), settings.groups.clone())
@@ -157,12 +161,7 @@ impl NovaMixerApplication {
             metadata.executable_name.as_deref(),
         );
         let name = metadata.version_name.clone().unwrap_or_else(|| {
-            metadata
-                .executable_name
-                .as_deref()
-                .and_then(|n| Path::new(n).file_stem())
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| key.clone())
+            app_icons::fallback_name(metadata.executable_name.as_deref().unwrap_or(&key))
         });
         let mut app = Application::offline(key, IdentityKind::Path, name);
         app.executable_name = metadata.executable_name;
@@ -170,7 +169,7 @@ impl NovaMixerApplication {
         app.icon = metadata
             .executable_path
             .as_ref()
-            .and_then(|p| app_icons::IconCache::default().icon_for_path(Path::new(p)));
+            .and_then(|path| app_icons::IconCache::default().icon_for_path(Path::new(path)));
         let mut s = self.settings();
         if let Some(old) = s.applications.iter().find(|existing| {
             existing.app_key.eq_ignore_ascii_case(&app.app_key)
@@ -223,9 +222,14 @@ impl NovaMixerApplication {
         if let Some(v) = patch.custom_name {
             app.custom_name = v;
             app.display_name = app.custom_name.clone().unwrap_or_else(|| {
-                app.executable_name
-                    .clone()
-                    .unwrap_or_else(|| app.app_key.clone())
+                app.executable_path
+                    .as_deref()
+                    .and_then(|path| app_icons::metadata_for_path(Path::new(path)).version_name)
+                    .unwrap_or_else(|| {
+                        app_icons::fallback_name(
+                            app.executable_name.as_deref().unwrap_or(&app.app_key),
+                        )
+                    })
             })
         }
         if let Some(v) = patch.remembered {
@@ -310,8 +314,49 @@ impl NovaMixerApplication {
         self.upsert_scene(scene).await
     }
     pub fn restore_backup(&self) -> Result<AppSettings> {
-        let v = self.store.restore_backup()?;
+        let mut v = self.store.restore_backup()?;
+        if enrich_applications(&mut v.applications, self.store.data_root()) {
+            self.store.save(&v)?;
+        }
         *self.settings.write() = v.clone();
         Ok(v)
     }
+}
+
+fn enrich_applications(applications: &mut [Application], _data_root: &Path) -> bool {
+    // Persisting the data URL in settings keeps the cache tied to its application record and
+    // avoids a second index/cleanup contract for small (roughly 2–3 KB) derived PNGs.
+    let icons = app_icons::IconCache::default();
+    let mut changed = false;
+    for app in applications {
+        let Some(path) = app.executable_path.as_deref() else {
+            continue;
+        };
+        let metadata = app_icons::metadata_for_path(Path::new(path));
+        if app.executable_name.is_none() && metadata.executable_name.is_some() {
+            app.executable_name = metadata.executable_name.clone();
+            changed = true;
+        }
+        let display_name = app.custom_name.clone().unwrap_or_else(|| {
+            metadata.version_name.unwrap_or_else(|| {
+                app_icons::fallback_name(app.executable_name.as_deref().unwrap_or_else(|| {
+                    Path::new(path)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(path)
+                }))
+            })
+        });
+        if app.display_name != display_name {
+            app.display_name = display_name;
+            changed = true;
+        }
+        if app.icon.is_none() {
+            if let Some(icon) = icons.icon_for_path(Path::new(path)) {
+                app.icon = Some(icon);
+                changed = true;
+            }
+        }
+    }
+    changed
 }

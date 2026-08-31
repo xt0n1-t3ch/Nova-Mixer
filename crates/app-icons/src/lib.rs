@@ -54,6 +54,30 @@ pub fn metadata_for_path(path: &Path) -> ProcessMetadata {
     }
 }
 
+pub fn fallback_name(path_or_name: &str) -> String {
+    let stem = Path::new(path_or_name)
+        .file_stem()
+        .unwrap_or_else(|| path_or_name.as_ref())
+        .to_string_lossy();
+    let mut capitalize = true;
+    stem.chars()
+        .map(|character| {
+            if character.is_alphanumeric() {
+                let mapped = if capitalize {
+                    character.to_uppercase().next().unwrap_or(character)
+                } else {
+                    character
+                };
+                capitalize = false;
+                mapped
+            } else {
+                capitalize = true;
+                character
+            }
+        })
+        .collect()
+}
+
 #[cfg(not(windows))]
 mod platform {
     use super::ProcessMetadata;
@@ -225,12 +249,15 @@ mod platform {
                 .as_bool()
                     && len > 1
                 {
-                    let text = String::from_utf16_lossy(std::slice::from_raw_parts(
-                        value.cast::<u16>(),
-                        len as usize - 1,
-                    ));
-                    if !text.trim().is_empty() {
-                        return Some(text);
+                    let raw = std::slice::from_raw_parts(value.cast::<u16>(), len as usize);
+                    let end = raw
+                        .iter()
+                        .position(|character| *character == 0)
+                        .unwrap_or(raw.len());
+                    let text = String::from_utf16_lossy(&raw[..end]);
+                    let text = text.trim();
+                    if !text.is_empty() && !text.chars().any(char::is_control) {
+                        return Some(text.to_owned());
                     }
                 }
             }

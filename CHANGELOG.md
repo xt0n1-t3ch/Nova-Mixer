@@ -8,6 +8,16 @@ NovaMixer 2.0.0 is a complete rewrite. The C# and WPF implementation is archived
 
 ### Added
 
+- A collapsible mixer navigation rail: 64px for maximum fader room or 208px with visible labels. A
+  dedicated disclosure keeps the choice discoverable; at the 860px window floor the rail collapses
+  without overwriting the user's saved preference, then restores it when the window grows.
+- A console-specific shell instead of the earlier DLSSync-shaped sidebar and toolbar: full-width
+  master deck, dedicated scene transport, channel tools, column legend, and continuous ruled
+  application channels. The inspector docks only when enough desk width remains and overlays below
+  that threshold instead of crushing application names.
+- Settings now uses a section index, working panels, and a live status rail with the current output,
+  application/session counts, controllability, scenes/groups, and verified efficiency-mode state.
+  About combines product identity, runtime facts, capabilities, and the same live diagnostics.
 - **The mixer is now built around applications rather than Windows audio sessions.** Windows gives
   one application several sessions whenever it likes, so the first build of this rewrite showed
   Discord as two identical rows and lost a row the moment its session expired. An application is now
@@ -49,6 +59,13 @@ NovaMixer 2.0.0 is a complete rewrite. The C# and WPF implementation is archived
 - An application configured before this release no longer appears twice. A saved entry identified
   only by file name is merged into the canonical executable path the moment that application is
   seen running, keeping its saved level, name, and group.
+- Real application icons and product names are resolved for remembered/offline applications too,
+  not only for live sessions. Icons are cached in settings so Thorium, Microsoft Edge, and Spotify
+  keep their actual logos across restarts instead of reverting to letter badges.
+- Channel tools no longer overflow the SOURCE/SIGNAL/LEVEL legend: Scenes, view tools, and the
+  column legend each own a stable band, and scene chips scroll only in their middle viewport.
+- The 860x600 minimum layout keeps complete names and secondary state such as `2 streams` and
+  `In Main`; it sheds pin and meter affordances before it sheds facts.
 - A global shortcut the platform rejects no longer prevents the application from starting. The
   binding is logged and left unbound, and a settings file carrying the old, unparseable
   `MediaVolume*` key names is repaired on load.
