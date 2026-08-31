@@ -23,6 +23,8 @@ pub async fn save_settings(
         .await
         .map_err(app_error)?;
     *state.settings.write() = settings.clone();
+    crate::desktop::sync_settings(&app, &settings)
+        .map_err(|error| AppError::Other(error.to_string()))?;
     let _ = app.emit("settings-updated", settings);
     Ok(())
 }
@@ -30,6 +32,12 @@ pub async fn save_settings(
 pub fn restore_backup(app: tauri::AppHandle, state: State<'_, AppState>) -> AppResult<AppSettings> {
     let settings = state.application.restore_backup().map_err(app_error)?;
     *state.settings.write() = settings.clone();
+    // A backup can carry different hotkeys or a different autostart preference,
+    // so the desktop integrations are resynchronized here exactly as they are on
+    // save. Skipping this would report restored settings while the live global
+    // shortcuts and autostart registration still came from the replaced file.
+    crate::desktop::sync_settings(&app, &settings)
+        .map_err(|error| AppError::Other(error.to_string()))?;
     let _ = app.emit("settings-updated", settings.clone());
     Ok(settings)
 }

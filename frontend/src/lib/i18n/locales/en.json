@@ -86,6 +86,7 @@
   "groups.active": "Active",
   "groups.setActive": "Make active",
   "groups.makeDefault": "Make default",
+  "groups.behaviour": "When {group} is active",
   "groups.linkedApps": "Linked applications",
   "groups.addApp": "Add application",
   "groups.removeApp": "Remove {app} from this group",

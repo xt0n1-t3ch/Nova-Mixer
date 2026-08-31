@@ -45,3 +45,6 @@ secrets/
 # Logs
 *.log
 !old/build_log.txt
+
+# Design-review screenshots
+.preview/

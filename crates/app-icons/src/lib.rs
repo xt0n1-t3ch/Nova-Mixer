@@ -182,11 +182,38 @@ mod platform {
         }
     }
 
+    /// Releases the memory device context on every exit path, including the
+    /// early return when the bitmap cannot be created. This runs once per icon
+    /// per session refresh, so a leaked context accumulates.
+    struct MemoryDc(windows::Win32::Graphics::Gdi::HDC);
+
+    impl Drop for MemoryDc {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = DeleteDC(self.0);
+            }
+        }
+    }
+
+    /// Releases the DIB section regardless of how the conversion ends.
+    struct DibSection(windows::Win32::Graphics::Gdi::HBITMAP);
+
+    impl Drop for DibSection {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = DeleteObject(HGDIOBJ(self.0 .0));
+            }
+        }
+    }
+
     unsafe fn icon_to_data_url(icon: HICON) -> Option<String> {
-        let dc = CreateCompatibleDC(None);
-        if dc.is_invalid() {
+        let raw_dc = CreateCompatibleDC(None);
+        if raw_dc.is_invalid() {
             return None;
         }
+        let dc_guard = MemoryDc(raw_dc);
+        let dc = dc_guard.0;
+
         let info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -200,16 +227,19 @@ mod platform {
             ..Default::default()
         };
         let mut bits: *mut c_void = std::ptr::null_mut();
-        let bitmap = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
-        let previous = SelectObject(dc, HGDIOBJ(bitmap.0));
+        let bitmap =
+            DibSection(CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?);
+        let previous = SelectObject(dc, HGDIOBJ(bitmap.0 .0));
         let drawn = DrawIconEx(dc, 0, 0, icon, 32, 32, 0, None, DI_NORMAL).is_ok();
         SelectObject(dc, previous);
         let mut bgra = vec![0u8; 32 * 32 * 4];
         if drawn {
             std::ptr::copy_nonoverlapping(bits.cast::<u8>(), bgra.as_mut_ptr(), bgra.len());
         }
-        let _ = DeleteObject(HGDIOBJ(bitmap.0));
-        let _ = DeleteDC(dc);
+        // The pixels are copied out, so both GDI objects can go now; the rest of
+        // this function only touches `bgra`.
+        drop(bitmap);
+        drop(dc_guard);
         if !drawn {
             return None;
         }

@@ -64,9 +64,9 @@ export function defaultSettings(overrides: Partial<AppSettings> = {}): AppSettin
     groups: [makeGroup()],
     active_group_id: "group-1",
     hotkeys: [
-      { action: "volume_up", accelerator: "MediaVolumeUp" },
-      { action: "volume_down", accelerator: "MediaVolumeDown" },
-      { action: "mute_toggle", accelerator: "MediaVolumeMute" },
+      { action: "volume_up", accelerator: "AudioVolumeUp" },
+      { action: "volume_down", accelerator: "AudioVolumeDown" },
+      { action: "mute_toggle", accelerator: "AudioVolumeMute" },
     ],
     volume_step: 0.05,
     smart_volume: true,

@@ -1,4 +1,5 @@
 mod commands;
+mod desktop;
 mod error;
 mod ipc_bindings;
 mod logging;
@@ -35,7 +36,9 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // The updater plugin is deliberately absent: it refuses to initialize
+        // without a `plugins.updater` block, and there is no release endpoint to
+        // point one at yet. Registering it anyway panicked at startup.
         .setup(|app| {
             let paths =
                 paths::AppPaths::resolve(app.handle()).map_err(|error| error.to_string())?;
@@ -54,6 +57,7 @@ pub fn run() {
                             .emit("session-removed", serde_json::json!({ "live_id": live_id }));
                     }
                     audio_sessions::AudioEvent::MasterUpdated(value) => {
+                        desktop::update_tray(&handle, value.volume, value.muted);
                         let _ = handle.emit("master-updated", value);
                     }
                     audio_sessions::AudioEvent::EndpointChanged(value) => {
@@ -65,7 +69,21 @@ pub fn run() {
                 })
                 .map_err(|error| error.to_string())?;
             app.manage(state::AppState::new(application));
+            desktop::setup(app.handle()).map_err(|error| error.to_string())?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let minimize = window
+                    .state::<state::AppState>()
+                    .application
+                    .settings()
+                    .minimize_to_tray;
+                if minimize {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             list_sessions,

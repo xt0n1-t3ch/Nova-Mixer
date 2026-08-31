@@ -156,6 +156,8 @@
     touch-action: none;
   }
 
+  /* The empty portion of the track stays visible at every level, so a row at
+     100% is still recognisably a slider rather than a filled bar. */
   .range-track {
     position: absolute;
     left: 0;
@@ -163,6 +165,7 @@
     height: var(--slider-height);
     border-radius: var(--radius-full);
     background: var(--slider-track);
+    box-shadow: inset 0 0 0 1px var(--slider-track);
     overflow: hidden;
     transition:
       height var(--dur-fast) var(--ease),
@@ -246,6 +249,9 @@
     border: none;
   }
 
+  /* The thumb is always present: it is the only cue that separates a slider
+     from the level meter beside it. It sits small and quiet at rest, then grows
+     on hover, focus and drag. */
   input[type="range"]::-webkit-slider-thumb {
     appearance: none;
     -webkit-appearance: none;
@@ -260,10 +266,7 @@
     transition:
       width var(--dur-fast) var(--spring),
       height var(--dur-fast) var(--spring),
-      opacity var(--dur-fast) var(--ease);
-    /* Thumb stays hidden until the row is engaged so a dense list reads as
-       bars, not as a wall of dots. It appears on hover, focus, and drag. */
-    opacity: 0;
+      box-shadow var(--dur-fast) var(--ease);
   }
 
   input[type="range"]::-moz-range-thumb {
@@ -275,7 +278,6 @@
     box-shadow:
       0 1px 3px var(--slider-thumb-ring),
       0 0 0 1px var(--slider-thumb-ring);
-    opacity: 0;
   }
   input[type="range"]::-moz-range-track {
     height: 100%;
@@ -284,23 +286,32 @@
   }
 
   .range:hover input[type="range"]::-webkit-slider-thumb,
-  .range.is-dragging input[type="range"]::-webkit-slider-thumb,
   input[type="range"]:focus-visible::-webkit-slider-thumb {
-    opacity: 1;
+    width: var(--slider-thumb-size-hover);
+    height: var(--slider-thumb-size-hover);
   }
   .range:hover input[type="range"]::-moz-range-thumb,
-  .range.is-dragging input[type="range"]::-moz-range-thumb,
   input[type="range"]:focus-visible::-moz-range-thumb {
-    opacity: 1;
+    width: var(--slider-thumb-size-hover);
+    height: var(--slider-thumb-size-hover);
   }
 
   .range.is-dragging input[type="range"]::-webkit-slider-thumb {
     width: var(--slider-thumb-size-hover);
     height: var(--slider-thumb-size-hover);
+    box-shadow:
+      0 1px 3px var(--slider-thumb-ring),
+      0 0 0 1px var(--slider-thumb-ring),
+      0 0 0 6px var(--accent-dim);
   }
 
-  .range.is-disabled input[type="range"]::-webkit-slider-thumb {
-    opacity: 0;
+  /* A locked session keeps its thumb so the row still reads as a volume
+     control, but the whole track is dimmed by `.is-disabled`. */
+  .range.is-muted input[type="range"]::-webkit-slider-thumb {
+    background: var(--slider-fill-muted);
+  }
+  .range.is-muted input[type="range"]::-moz-range-thumb {
+    background: var(--slider-fill-muted);
   }
 
   /* The focus ring goes on the track, not the 24px hit area, so it traces the

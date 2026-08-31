@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+audio-sessions = { path = "../audio-sessions" }
 novamixer-application = { path = "../novamixer-application" }
 novamixer-contracts = { path = "../novamixer-contracts" }
 serde.workspace = true

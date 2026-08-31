@@ -14,6 +14,8 @@ enum Command {
         json: bool,
         #[arg(long, value_names = ["APP_KEY", "SCALAR"], num_args = 2)]
         set_volume: Option<Vec<String>>,
+        #[arg(long)]
+        watch: bool,
     },
 }
 #[derive(Serialize)]
@@ -40,8 +42,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
     let cli = Cli::parse();
     match cli.command {
-        Command::Doctor { json, set_volume } => {
-            let app = NovaMixerApplication::start(|_| {})?;
+        Command::Doctor {
+            json,
+            set_volume,
+            watch,
+        } => {
+            let started = std::sync::Arc::new(std::sync::Mutex::new(None::<std::time::Instant>));
+            let event_clock = started.clone();
+            let app = NovaMixerApplication::start(move |event| {
+                if watch {
+                    let elapsed = event_clock
+                        .lock()
+                        .ok()
+                        .and_then(|value| value.as_ref().map(std::time::Instant::elapsed))
+                        .map_or(0, |value| value.as_millis());
+                    match event {
+                        audio_sessions::AudioEvent::SessionAdded(session) => eprintln!(
+                            "event +{}ms session-added {} volume={:.3}",
+                            elapsed, session.app_key, session.volume
+                        ),
+                        audio_sessions::AudioEvent::SessionUpdated(session) => eprintln!(
+                            "event +{}ms session-updated {} volume={:.3}",
+                            elapsed, session.app_key, session.volume
+                        ),
+                        audio_sessions::AudioEvent::SessionRemoved { live_id } => {
+                            eprintln!("event +{}ms session-removed {}", elapsed, live_id)
+                        }
+                        _ => {}
+                    }
+                }
+            })?;
             let mut snapshot = app.snapshot().await?;
             if let Some(args) = set_volume {
                 let scalar: f32 = args[1].parse()?;
@@ -90,6 +120,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 println!("Loaded groups: {}", report.loaded_group_count);
+            }
+            if watch {
+                if let Ok(mut value) = started.lock() {
+                    *value = Some(std::time::Instant::now());
+                }
+                eprintln!("Watching Core Audio callbacks. Press Ctrl+C to stop.");
+                tokio::signal::ctrl_c().await?;
             }
         }
     }

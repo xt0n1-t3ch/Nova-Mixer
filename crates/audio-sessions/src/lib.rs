@@ -271,6 +271,10 @@ pub(crate) enum Command {
     #[cfg(windows)]
     Reenumerate,
     #[cfg(windows)]
+    SessionChanged(String),
+    #[cfg(windows)]
+    SessionRemoved(String),
+    #[cfg(windows)]
     RebuildEndpoint,
     #[allow(dead_code)]
     Shutdown,

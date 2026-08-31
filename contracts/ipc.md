@@ -99,7 +99,7 @@ An application bound to a group. Identity is the `app_key`, not the live session
 | Field | Type | Notes |
 |:---|:---|:---|
 | `action` | `HotkeyAction` | |
-| `accelerator` | `string \| null` | Tauri accelerator string, e.g. `"CmdOrCtrl+Alt+Up"` or `"MediaVolumeUp"`. `null` unbinds. |
+| `accelerator` | `string \| null` | Tauri accelerator string, e.g. `"CmdOrCtrl+Alt+Up"` or `"AudioVolumeUp"`. `null` unbinds. |
 
 ### `HotkeyAction`
 

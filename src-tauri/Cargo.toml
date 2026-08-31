@@ -26,8 +26,10 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2"
 tauri-plugin-os = "2"
 tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
+# updater is not registered; see the comment in src/lib.rs
+# tauri-plugin-updater = "2"
 novamixer-contracts = { path = "../crates/novamixer-contracts" }
+audio-policy = { path = "../crates/audio-policy" }
 audio-sessions = { path = "../crates/audio-sessions" }
 novamixer-application = { path = "../crates/novamixer-application" }
 settings-store = { path = "../crates/settings-store" }

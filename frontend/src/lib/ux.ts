@@ -117,7 +117,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { keys: ["esc"], descriptionKey: "shortcut.closeDialog" },
 ];
 
-/** Human label for a Tauri accelerator, e.g. `"MediaVolumeUp"` → `"Media Volume Up"`. */
+/** Human label for a Tauri accelerator, e.g. `"AudioVolumeUp"` → `"Audio Volume Up"`. */
 export function formatAccelerator(accelerator: string | null): string | null {
   if (!accelerator) return null;
   return accelerator

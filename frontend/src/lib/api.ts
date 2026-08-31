@@ -83,7 +83,7 @@ export type HotkeyAction = "volume_up" | "volume_down" | "mute_toggle";
 
 export interface HotkeyBinding {
   action: HotkeyAction;
-  /** Tauri accelerator, e.g. `"MediaVolumeUp"`. Null unbinds the action. */
+  /** Tauri accelerator, e.g. `"AudioVolumeUp"`. Null unbinds the action. */
   accelerator: string | null;
 }
 

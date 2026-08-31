@@ -157,11 +157,44 @@ fn atomic_write_json(path: &Path, settings: &AppSettings) -> io::Result<()> {
     file.flush()?;
     file.sync_all()?;
     drop(file);
-    if path.exists() {
-        #[cfg(windows)]
-        fs::remove_file(path)?;
+    replace_file(&temp, path)
+}
+
+/// Replaces `destination` with `temp` in one step.
+///
+/// Deleting the destination first and then renaming leaves a window with no
+/// settings file at all, and loses the previous file outright if the rename then
+/// fails. `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` performs the swap as a
+/// single operation, so a reader sees either the old file or the new one.
+#[cfg(windows)]
+fn replace_file(temp: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
     }
-    fs::rename(temp, path)
+
+    let from = wide(temp);
+    let to = wide(destination);
+    // SAFETY: both buffers are null-terminated and outlive the call.
+    unsafe {
+        MoveFileExW(
+            PCWSTR(from.as_ptr()),
+            PCWSTR(to.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    }
+    .map_err(|error| io::Error::other(error.message()))
+}
+
+#[cfg(not(windows))]
+fn replace_file(temp: &Path, destination: &Path) -> io::Result<()> {
+    // `rename` already replaces the destination atomically on POSIX.
+    fs::rename(temp, destination)
 }
 
 pub struct DebouncedAutosave {
@@ -312,9 +345,9 @@ fn nonempty_string(value: String) -> Option<String> {
 
 fn hotkey(action: HotkeyAction, vk: i32) -> HotkeyBinding {
     let accelerator = match vk {
-        175 => Some("MediaVolumeUp".into()),
-        174 => Some("MediaVolumeDown".into()),
-        173 => Some("MediaVolumeMute".into()),
+        175 => Some("AudioVolumeUp".into()),
+        174 => Some("AudioVolumeDown".into()),
+        173 => Some("AudioVolumeMute".into()),
         0 => None,
         value => {
             warn!(
@@ -368,9 +401,9 @@ mod tests {
                 .map(|item| item.accelerator.as_deref())
                 .collect::<Vec<_>>(),
             vec![
-                Some("MediaVolumeUp"),
-                Some("MediaVolumeDown"),
-                Some("MediaVolumeMute")
+                Some("AudioVolumeUp"),
+                Some("AudioVolumeDown"),
+                Some("AudioVolumeMute")
             ]
         );
         assert_eq!(report.settings.volume_step, 0.05);

@@ -27,18 +27,19 @@
   /** Keys that cannot stand alone as a shortcut. */
   const MODIFIERS = new Set(["Control", "Shift", "Alt", "Meta"]);
 
-  /** DOM `event.key` values that Tauri names differently. */
+  /** DOM `event.key` values that Tauri names differently. The media keys need
+   *  no entry: `AudioVolumeUp` and friends are already Tauri's own names. */
   const KEY_ALIASES: Record<string, string> = {
     ArrowUp: "Up",
     ArrowDown: "Down",
     ArrowLeft: "Left",
     ArrowRight: "Right",
     " ": "Space",
-    Escape: "Escape",
-    AudioVolumeUp: "MediaVolumeUp",
-    AudioVolumeDown: "MediaVolumeDown",
-    AudioVolumeMute: "MediaVolumeMute",
   };
+
+  /** Keys that are safe to bind on their own because they carry no other
+   *  meaning. Anything else needs a modifier. */
+  const STANDALONE = /^(AudioVolume(Up|Down|Mute)|MediaTrack(Next|Previous)|MediaPlayPause|MediaStop|F\d{1,2})$/;
 
   function toAccelerator(event: KeyboardEvent): string | null {
     if (MODIFIERS.has(event.key)) return null;
@@ -52,9 +53,10 @@
     const raw = KEY_ALIASES[event.key] ?? event.key;
     const key = raw.length === 1 ? raw.toUpperCase() : raw;
 
-    // A bare letter would swallow that key system-wide, which is a trap. Media
-    // keys are the exception: they carry no other meaning.
-    if (parts.length === 0 && !key.startsWith("Media") && !key.startsWith("F")) return null;
+    // A bare letter bound globally would swallow that key everywhere, so a
+    // modifier is required unless the key is one of the dedicated media or
+    // function keys.
+    if (parts.length === 0 && !STANDALONE.test(key)) return null;
 
     parts.push(key);
     return parts.join("+");

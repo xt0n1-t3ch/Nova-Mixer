@@ -207,7 +207,7 @@
           </section>
 
           <section class="surface">
-            <h3 class="section-heading">{$t("view.groups.title")}</h3>
+            <h3 class="section-heading">{$t("groups.behaviour", { group: group.name })}</h3>
 
             <div class="setting-row">
               <div class="setting-copy">

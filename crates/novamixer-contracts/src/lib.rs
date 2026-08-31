@@ -160,15 +160,15 @@ impl Default for AppSettings {
             hotkeys: vec![
                 HotkeyBinding {
                     action: HotkeyAction::VolumeUp,
-                    accelerator: Some("MediaVolumeUp".into()),
+                    accelerator: Some("AudioVolumeUp".into()),
                 },
                 HotkeyBinding {
                     action: HotkeyAction::VolumeDown,
-                    accelerator: Some("MediaVolumeDown".into()),
+                    accelerator: Some("AudioVolumeDown".into()),
                 },
                 HotkeyBinding {
                     action: HotkeyAction::MuteToggle,
-                    accelerator: Some("MediaVolumeMute".into()),
+                    accelerator: Some("AudioVolumeMute".into()),
                 },
             ],
             volume_step: 0.05,
@@ -206,7 +206,23 @@ impl AppSettings {
         {
             self.active_group_id = Some(self.groups[chosen].id.clone());
         }
+        for binding in &mut self.hotkeys {
+            if let Some(accelerator) = &binding.accelerator {
+                binding.accelerator = Some(repair_accelerator(accelerator));
+            }
+        }
     }
+}
+
+/// Rewrites accelerator names that an earlier build wrote but the platform
+/// rejects.
+///
+/// A settings file outlives the build that wrote it, and a rejected accelerator
+/// leaves its action silently unbound, so the repair happens on load rather than
+/// being left for the user to discover and fix by hand.
+fn repair_accelerator(accelerator: &str) -> String {
+    // Tauri names the volume keys `AudioVolume*`; `MediaVolume*` never parsed.
+    accelerator.replace("MediaVolume", "AudioVolume")
 }
 
 #[cfg(test)]
@@ -391,5 +407,52 @@ mod tests {
             settings.active_group_id.as_deref(),
             Some(settings.groups[0].id.as_str())
         );
+    }
+
+    #[test]
+    fn validate_repairs_rejected_media_key_names() {
+        // An earlier build wrote `MediaVolumeUp`, which the platform refuses to
+        // parse. Left alone it leaves the action permanently unbound.
+        let mut settings = AppSettings {
+            hotkeys: vec![
+                HotkeyBinding {
+                    action: HotkeyAction::VolumeUp,
+                    accelerator: Some("MediaVolumeUp".into()),
+                },
+                HotkeyBinding {
+                    action: HotkeyAction::MuteToggle,
+                    accelerator: Some("Control+Alt+M".into()),
+                },
+                HotkeyBinding {
+                    action: HotkeyAction::VolumeDown,
+                    accelerator: None,
+                },
+            ],
+            ..AppSettings::default()
+        };
+
+        settings.validate();
+
+        assert_eq!(
+            settings.hotkeys[0].accelerator.as_deref(),
+            Some("AudioVolumeUp")
+        );
+        // An accelerator that already parses is left exactly as it was.
+        assert_eq!(
+            settings.hotkeys[1].accelerator.as_deref(),
+            Some("Control+Alt+M")
+        );
+        assert_eq!(settings.hotkeys[2].accelerator, None);
+    }
+
+    #[test]
+    fn defaults_use_accelerators_the_platform_accepts() {
+        for binding in AppSettings::default().hotkeys {
+            let accelerator = binding.accelerator.expect("default bindings are bound");
+            assert!(
+                !accelerator.contains("MediaVolume"),
+                "{accelerator} is not a valid accelerator name"
+            );
+        }
     }
 }

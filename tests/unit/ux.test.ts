@@ -72,7 +72,7 @@ describe("formatAccelerator", () => {
   });
 
   it("splits a camel-case Tauri key into readable words", () => {
-    expect(formatAccelerator("MediaVolumeUp")).toBe("Media Volume Up");
+    expect(formatAccelerator("AudioVolumeUp")).toBe("Audio Volume Up");
   });
 
   it("spaces the plus signs in a chord", () => {

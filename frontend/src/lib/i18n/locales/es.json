@@ -45,8 +45,8 @@
   "view.about.title": "Acerca de",
   "view.about.subtitle": "Versión, licencia y dónde se guardan los archivos.",
 
-  "mixer.master": "General",
-  "mixer.masterVolume": "Volumen general",
+  "mixer.master": "Salida",
+  "mixer.masterVolume": "Volumen de salida",
   "mixer.outputDevice": "Dispositivo de salida",
   "mixer.sessionVolume": "Volumen de {app}",
   "mixer.mute": "Silenciar {app}",
@@ -86,6 +86,7 @@
   "groups.active": "Activo",
   "groups.setActive": "Activar",
   "groups.makeDefault": "Marcar como predeterminado",
+  "groups.behaviour": "Cuando {group} está activo",
   "groups.linkedApps": "Aplicaciones vinculadas",
   "groups.addApp": "Añadir aplicación",
   "groups.removeApp": "Quitar {app} de este grupo",
