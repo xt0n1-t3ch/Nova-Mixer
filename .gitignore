@@ -1,0 +1,47 @@
+# Rust
+/target
+**/target/
+
+# Node
+node_modules/
+.pnpm-store/
+
+# Frontend build output
+frontend/dist/
+frontend/.vite/
+
+# Tauri generated
+src-tauri/gen/schemas/
+
+# Test artifacts
+tests/e2e/.report/
+tests/e2e/test-results/
+coverage/
+.audit/
+
+# Legacy .NET build output inside the archive
+old/**/bin/
+old/**/obj/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Secrets and local env
+.env
+.env.local
+secrets/
+*.key
+*.pem
+
+# Logs
+*.log
+!old/build_log.txt
