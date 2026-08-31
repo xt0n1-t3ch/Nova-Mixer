@@ -3,15 +3,27 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
 export const COMMANDS = {
+  add_application: "add_application",
+  apply_scene: "apply_scene",
+  capture_scene: "capture_scene",
   delete_group: "delete_group",
+  delete_scene: "delete_scene",
+  get_efficiency_status: "get_efficiency_status",
   get_settings: "get_settings",
-  list_running_apps: "list_running_apps",
-  list_sessions: "list_sessions",
+  list_app_candidates: "list_app_candidates",
+  list_applications: "list_applications",
+  list_output_devices: "list_output_devices",
   open_data_folder: "open_data_folder",
   open_devtools: "open_devtools",
+  remove_application: "remove_application",
+  reorder_applications: "reorder_applications",
   restore_backup: "restore_backup",
   save_settings: "save_settings",
   set_active_group: "set_active_group",
+  set_app_mute: "set_app_mute",
+  set_app_volume: "set_app_volume",
+  set_default_output: "set_default_output",
+  set_efficiency_mode: "set_efficiency_mode",
   set_group_volume: "set_group_volume",
   set_hotkeys: "set_hotkeys",
   set_master_mute: "set_master_mute",
@@ -19,7 +31,9 @@ export const COMMANDS = {
   set_metering_active: "set_metering_active",
   set_session_mute: "set_session_mute",
   set_session_volume: "set_session_volume",
+  update_application: "update_application",
   upsert_group: "upsert_group",
+  upsert_scene: "upsert_scene",
 } as const;
 
 export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];

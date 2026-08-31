@@ -16,12 +16,15 @@
     appKey,
     size = 36,
     isSystem = false,
+    dimmed = false,
   }: {
     src: string | null;
     name: string;
     appKey: string;
     size?: number;
     isSystem?: boolean;
+    /** Desaturates the icon for an application that is not currently running. */
+    dimmed?: boolean;
   } = $props();
 
   let failed = $state(false);
@@ -38,6 +41,7 @@
 {#if showImage}
   <img
     class="app-icon"
+    class:is-dimmed={dimmed}
     style:--icon-size="{size}px"
     src={src}
     alt=""
@@ -50,6 +54,7 @@
 {:else}
   <span
     class="app-icon app-icon-fallback aura-badge"
+    class:is-dimmed={dimmed}
     style:--icon-size="{size}px"
     data-tint={isSystem ? undefined : tintForKey(appKey)}
     aria-hidden="true"
@@ -76,6 +81,13 @@
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-md);
+  }
+
+  /* An offline application stays listed so its settings remain reachable; the
+     desaturated icon says "not running" without hiding the row. */
+  .app-icon.is-dimmed {
+    filter: grayscale(0.85);
+    opacity: 0.75;
   }
 
   .app-icon-initial {

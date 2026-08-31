@@ -31,14 +31,14 @@
   } = $props();
 
   let muteLabel = $derived(
-    master.muted ? $t("mixer.unmuteMaster") : $t("mixer.muteMaster"),
+    master.muted ? $t("master.unmute") : $t("master.mute"),
   );
 </script>
 
 <section class="master edge-accent" class:is-muted={master.muted}>
   <div class="master-head">
     <div class="master-copy">
-      <span class="master-label">{$t("mixer.master")}</span>
+      <span class="master-label">{$t("master.label")}</span>
       <span class="master-device truncate">
         <Speaker size={12} aria-hidden="true" />
         {master.endpoint_name}
@@ -68,8 +68,8 @@
         value={master.volume}
         muted={master.muted}
         size="lg"
-        ariaLabel={$t("mixer.masterVolume")}
-        ariaValueText={volumeValueText(master.volume, master.muted, $t("mixer.muted"))}
+        ariaLabel={$t("master.volume")}
+        ariaValueText={volumeValueText(master.volume, master.muted, $t("app.muted"))}
         {onInput}
         {onCommit}
       />

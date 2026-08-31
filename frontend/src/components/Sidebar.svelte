@@ -9,14 +9,14 @@
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import type { Component } from "svelte";
-  import { currentView, settings, persistSettings, sortedSessions } from "../lib/stores";
+  import { currentView, settings, persistSettings, sortedApplications } from "../lib/stores";
   import { motionDuration, type ViewId } from "../lib/ux";
   import { locale, LOCALE_LABELS, setLocale, t, type Locale } from "../lib/i18n/index";
 
   type NavItem = { id: ViewId; icon: Component<{ size?: number }>; count?: boolean };
 
   const audioGroup: NavItem[] = [
-    { id: "mixer", icon: SlidersVertical, count: true },
+    { id: "applications", icon: SlidersVertical, count: true },
     { id: "groups", icon: Layers },
   ];
   const generalGroup: NavItem[] = [
@@ -35,7 +35,9 @@
   });
 
   let collapsed = $derived($settings?.ui_prefs.sidebar_collapsed ?? false);
-  let sessionCount = $derived($sortedSessions.length);
+  // The badge counts what is currently making sound, not the whole registry: a
+  // list of offline entries is not news.
+  let runningCount = $derived($sortedApplications.filter((app) => app.running).length);
 
   function toggleCollapsed(): void {
     const current = $settings;
@@ -85,8 +87,8 @@
           {$t("nav." + item.id)}
         </span>
       {/if}
-      {#if item.count && sessionCount > 0}
-        <span class="nav-count" class:is-collapsed={collapsed} aria-hidden="true">{sessionCount}</span>
+      {#if item.count && runningCount > 0}
+        <span class="nav-count" class:is-collapsed={collapsed} aria-hidden="true">{runningCount}</span>
       {/if}
     </button>
   {/snippet}

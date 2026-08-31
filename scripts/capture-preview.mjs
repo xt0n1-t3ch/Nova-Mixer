@@ -24,14 +24,14 @@ const BASE = `http://localhost:${PORT}/preview.html`;
 const VIEWPORT = { width: 1280, height: 800 };
 
 const MATRIX = [
-  { view: "mixer", theme: "dark", lang: "en" },
-  { view: "mixer", theme: "light", lang: "en" },
+  { view: "applications", theme: "dark", lang: "en" },
+  { view: "applications", theme: "light", lang: "en" },
   { view: "groups", theme: "dark", lang: "en" },
   { view: "groups", theme: "light", lang: "en" },
   { view: "settings", theme: "dark", lang: "en" },
   { view: "settings", theme: "light", lang: "en" },
   { view: "about", theme: "dark", lang: "en" },
-  { view: "mixer", theme: "dark", lang: "es" },
+  { view: "applications", theme: "dark", lang: "es" },
 ];
 
 function startVite() {

@@ -13,7 +13,7 @@ import { installPreviewBackend, startPreviewMetering } from "./mockBackend";
 const params = new URLSearchParams(window.location.search);
 const theme = params.get("theme") === "light" ? "light" : "dark";
 const language = params.get("lang") === "es" ? "es" : "en";
-const view = params.get("view") ?? "mixer";
+const view = params.get("view") ?? "applications";
 
 // The transport must exist before any Tauri module initializes, and the theme
 // must be set before the first paint, so both happen ahead of the dynamic

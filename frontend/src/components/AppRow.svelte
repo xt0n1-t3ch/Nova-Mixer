@@ -2,6 +2,11 @@
   /**
    * One application's channel strip.
    *
+   * This row represents an *application*, not a Windows audio session. Windows
+   * hands one application several sessions whenever it likes, which is why the
+   * previous version showed Discord twice. Sessions live behind the disclosure
+   * caret, where they belong: useful for diagnosis, not for everyday mixing.
+   *
    * Layout is a fixed grid rather than flex so every row's slider starts and
    * ends at the same x position down the whole list. Ragged sliders make a
    * mixer unreadable, and flex would produce exactly that as names vary.
@@ -10,130 +15,229 @@
   import Volume1 from "@lucide/svelte/icons/volume-1";
   import VolumeX from "@lucide/svelte/icons/volume-x";
   import Lock from "@lucide/svelte/icons/lock";
-  import type { AudioSession } from "../lib/api";
+  import Pin from "@lucide/svelte/icons/pin";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Settings2 from "@lucide/svelte/icons/settings-2";
+  import type { Application } from "../lib/api";
   import { formatPercent, volumeValueText } from "../lib/volume";
   import AppIcon from "./AppIcon.svelte";
   import Meter from "./Meter.svelte";
   import Range from "./Range.svelte";
+  import SessionRow from "./SessionRow.svelte";
   import { t } from "../lib/i18n/index";
 
   let {
-    session,
+    app,
     peak = 0,
+    sessionPeaks = {},
     volume,
     groupName,
     compact = false,
+    expanded = false,
+    inspected = false,
     onInput,
     onCommit,
     onToggleMute,
+    onToggleExpanded,
+    onInspect,
+    onTogglePin,
+    onSessionInput,
+    onSessionCommit,
+    onSessionMute,
   }: {
-    session: AudioSession;
+    app: Application;
     peak?: number;
-    /** Overrides `session.volume` while a drag is in flight. */
+    sessionPeaks?: Record<string, number>;
+    /** Overrides `app.volume` while a drag is in flight. */
     volume: number;
     groupName?: string | null;
     compact?: boolean;
+    expanded?: boolean;
+    inspected?: boolean;
     onInput: (value: number) => void;
     onCommit: (value: number) => void;
     onToggleMute: () => void;
+    onToggleExpanded: () => void;
+    onInspect: () => void;
+    onTogglePin: () => void;
+    onSessionInput: (liveId: string, value: number) => void;
+    onSessionCommit: (liveId: string, value: number) => void;
+    onSessionMute: (liveId: string, muted: boolean) => void;
   } = $props();
 
-  let label = $derived(
-    session.is_system_sounds ? $t("mixer.systemSounds") : session.display_name,
-  );
-  let idle = $derived(session.state === "inactive");
+  let label = $derived(app.is_system_sounds ? $t("app.systemSounds") : app.display_name);
   let iconSize = $derived(compact ? 28 : 38);
+  let sessionCount = $derived(app.sessions.length);
+  /** Only worth disclosing when there is more than one thing to see. */
+  let canExpand = $derived(sessionCount > 1);
 
   let muteLabel = $derived(
-    session.muted ? $t("mixer.unmute", { app: label }) : $t("mixer.mute", { app: label }),
+    app.muted ? $t("app.unmute", { app: label }) : $t("app.mute", { app: label }),
   );
+
+  /** The secondary line carries one fact, chosen by what the user needs most. */
+  let subtitle = $derived.by(() => {
+    if (!app.controllable && app.running) return { kind: "locked" as const };
+    if (!app.running) return { kind: "offline" as const };
+    if (sessionCount > 1) return { kind: "sessions" as const, count: sessionCount };
+    if (groupName) return { kind: "group" as const, name: groupName };
+    if (app.executable_name) return { kind: "exe" as const, text: app.executable_name };
+    return { kind: "none" as const };
+  });
 </script>
 
-<div
-  class="app-row"
-  class:is-compact={compact}
-  class:is-idle={idle}
-  class:is-muted={session.muted}
-  class:is-locked={!session.controllable}
->
-  <div class="row-identity">
-    <AppIcon
-      src={session.icon}
-      name={label}
-      appKey={session.app_key}
-      size={iconSize}
-      isSystem={session.is_system_sounds}
-    />
-    <div class="row-text">
-      <span class="row-name truncate" title={label}>{label}</span>
-      {#if !compact}
-        <span class="row-sub truncate">
-          {#if !session.controllable}
-            <span class="row-flag">
-              <Lock size={10} />
-              {$t("mixer.notControllableShort")}
-            </span>
-          {:else if idle}
-            <span class="row-flag">{$t("mixer.inactive")}</span>
-          {:else if groupName}
-            <span class="row-flag">{$t("mixer.inGroup", { group: groupName })}</span>
-          {:else if session.executable_name}
-            {session.executable_name}
-          {/if}
-        </span>
+<div class="app-block" class:is-expanded={expanded}>
+  <div
+    class="app-row"
+    class:is-compact={compact}
+    class:is-offline={!app.running}
+    class:is-muted={app.muted}
+    class:is-locked={!app.controllable && app.running}
+    class:is-inspected={inspected}
+  >
+    <div class="row-lead">
+      {#if canExpand}
+        <button
+          class="disclosure"
+          class:is-open={expanded}
+          onclick={onToggleExpanded}
+          aria-expanded={expanded}
+          aria-label={$t("app.toggleSessions", { app: label })}
+        >
+          <ChevronRight size={13} />
+        </button>
+      {:else}
+        <span class="disclosure-spacer" aria-hidden="true"></span>
       {/if}
+
+      <AppIcon
+        src={app.icon}
+        name={label}
+        appKey={app.app_key}
+        size={iconSize}
+        isSystem={app.is_system_sounds}
+        dimmed={!app.running}
+      />
+
+      <div class="row-text">
+        <!-- No pin badge beside the name: the pin button on the right is always
+             visible and carries the state, so a second marker only adds noise. -->
+        <span class="row-name truncate" title={label}>{label}</span>
+        {#if !compact}
+          <span class="row-sub truncate">
+            {#if subtitle.kind === "locked"}
+              <span class="row-flag is-warning"><Lock size={10} />{$t("app.lockedShort")}</span>
+            {:else if subtitle.kind === "offline"}
+              <span class="row-flag">{$t("app.offline")}</span>
+            {:else if subtitle.kind === "sessions"}
+              <span class="row-flag">{$t("app.sessionCount", { count: subtitle.count })}</span>
+            {:else if subtitle.kind === "group"}
+              <span class="row-flag">{$t("app.inGroup", { group: subtitle.name })}</span>
+            {:else if subtitle.kind === "exe"}
+              {subtitle.text}
+            {/if}
+          </span>
+        {/if}
+      </div>
+    </div>
+
+    <div class="row-meter">
+      <Meter peak={app.muted || !app.running ? 0 : peak} bars={compact ? 4 : 5} />
+    </div>
+
+    <div class="row-fader">
+      <Range
+        value={volume}
+        disabled={!app.controllable && app.running}
+        muted={app.muted}
+        indeterminate={app.mixed}
+        size={compact ? "sm" : "md"}
+        resetTo={1}
+        ariaLabel={$t("app.volumeFor", { app: label })}
+        ariaValueText={app.mixed
+          ? $t("app.mixedLevel")
+          : volumeValueText(volume, app.muted, $t("app.muted"))}
+        {onInput}
+        {onCommit}
+      />
+    </div>
+
+    <output class="row-value mono" for="">
+      {app.mixed ? $t("app.mixedShort") : formatPercent(volume)}
+    </output>
+
+    <button
+      class="icon-btn"
+      class:is-danger={app.muted}
+      disabled={!app.controllable && app.running}
+      onclick={onToggleMute}
+      aria-label={muteLabel}
+      aria-pressed={app.muted}
+      title={!app.controllable && app.running ? $t("app.lockedHint") : muteLabel}
+    >
+      {#if app.muted}
+        <VolumeX size={16} />
+      {:else if volume < 0.5}
+        <Volume1 size={16} />
+      {:else}
+        <Volume2 size={16} />
+      {/if}
+    </button>
+
+    <div class="row-actions">
+      <button
+        class="icon-btn icon-btn-sm"
+        class:is-on={app.pinned}
+        onclick={onTogglePin}
+        aria-pressed={app.pinned}
+        aria-label={app.pinned ? $t("app.unpin", { app: label }) : $t("app.pin", { app: label })}
+        title={app.pinned ? $t("app.unpin", { app: label }) : $t("app.pin", { app: label })}
+      >
+        <Pin size={13} />
+      </button>
+      <button
+        class="icon-btn icon-btn-sm"
+        class:is-on={inspected}
+        onclick={onInspect}
+        aria-label={$t("app.configure", { app: label })}
+        title={$t("app.configure", { app: label })}
+      >
+        <Settings2 size={13} />
+      </button>
     </div>
   </div>
 
-  <div class="row-meter">
-    <Meter peak={session.muted ? 0 : peak} bars={compact ? 4 : 5} />
-  </div>
-
-  <div class="row-fader">
-    <Range
-      value={volume}
-      disabled={!session.controllable}
-      muted={session.muted}
-      size={compact ? "sm" : "md"}
-      resetTo={1}
-      ariaLabel={$t("mixer.sessionVolume", { app: label })}
-      ariaValueText={volumeValueText(volume, session.muted, $t("mixer.muted"))}
-      {onInput}
-      {onCommit}
-    />
-  </div>
-
-  <output class="row-value mono" for="">{formatPercent(volume)}</output>
-
-  <button
-    class="icon-btn"
-    class:is-danger={session.muted}
-    disabled={!session.controllable}
-    onclick={onToggleMute}
-    aria-label={muteLabel}
-    aria-pressed={session.muted}
-    title={!session.controllable ? $t("mixer.notControllable") : muteLabel}
-  >
-    {#if session.muted}
-      <VolumeX size={16} />
-    {:else if volume < 0.5}
-      <Volume1 size={16} />
-    {:else}
-      <Volume2 size={16} />
-    {/if}
-  </button>
+  {#if expanded && sessionCount > 0}
+    <ul class="session-list" aria-label={$t("app.sessionsFor", { app: label })}>
+      {#each app.sessions as session (session.live_id)}
+        <li>
+          <SessionRow
+            {session}
+            peak={sessionPeaks[session.live_id] ?? 0}
+            onInput={(value) => onSessionInput(session.live_id, value)}
+            onCommit={(value) => onSessionCommit(session.live_id, value)}
+            onToggleMute={() => onSessionMute(session.live_id, !session.muted)}
+          />
+        </li>
+      {/each}
+    </ul>
+  {/if}
 </div>
 
 <style>
-  /* Columns: identity | meter | fader | readout | mute.
-     Only the fader flexes, so every readout and mute button lines up. */
+  .app-block {
+    border-radius: var(--radius-lg);
+  }
+
+  /* Columns: lead | meter | fader | readout | mute | actions.
+     Only the fader flexes, so every readout and button lines up down the list. */
   .app-row {
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) auto minmax(120px, 2fr) 46px 32px;
+    grid-template-columns: minmax(0, 1.1fr) auto minmax(120px, 2fr) 48px 32px auto;
     align-items: center;
     gap: var(--space-3);
     height: var(--row-height);
-    padding: 0 var(--space-4);
+    padding: 0 var(--space-3) 0 var(--space-2);
     border-radius: var(--radius-lg);
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -146,34 +250,66 @@
     background: var(--bg-card-hover);
     border-color: var(--border-hover);
   }
-  .app-row:focus-within {
-    border-color: var(--border-hover);
+  .app-row.is-inspected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
 
   .app-row.is-compact {
-    grid-template-columns: minmax(0, 1fr) auto minmax(110px, 2fr) 42px 32px;
+    grid-template-columns: minmax(0, 1fr) auto minmax(110px, 2fr) 44px 32px auto;
     gap: var(--space-2);
-    padding: 0 var(--space-3);
   }
 
-  /* Idle rows stay listed and controllable, matching the Windows mixer, but
-     recede so the audible applications read first. */
-  .app-row.is-idle {
-    opacity: 0.62;
+  .is-expanded .app-row {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
   }
-  .app-row.is-idle:hover,
-  .app-row.is-idle:focus-within {
+
+  /* An offline application keeps its settings reachable, so it stays listed but
+     recedes behind everything that is actually making sound. */
+  .app-row.is-offline {
+    opacity: 0.55;
+  }
+  .app-row.is-offline:hover,
+  .app-row.is-offline:focus-within {
     opacity: 1;
   }
 
-  .row-identity {
+  .row-lead {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2);
     min-width: 0;
   }
-  .is-compact .row-identity {
-    gap: var(--space-2);
+
+  .disclosure,
+  .disclosure-spacer {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+  .disclosure {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    transition:
+      transform var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease),
+      background var(--dur-fast) var(--ease);
+  }
+  .disclosure:hover {
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+  }
+  .disclosure:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-ring);
+  }
+  .disclosure.is-open {
+    transform: rotate(90deg);
+    color: var(--accent);
   }
 
   .row-text {
@@ -181,6 +317,7 @@
     flex-direction: column;
     min-width: 0;
     line-height: var(--lh-tight);
+    margin-left: var(--space-1);
   }
   .row-name {
     font-size: var(--fs-base);
@@ -200,7 +337,7 @@
     align-items: center;
     gap: 4px;
   }
-  .is-locked .row-flag {
+  .row-flag.is-warning {
     color: var(--warning);
   }
 
@@ -223,12 +360,45 @@
     color: var(--text-placeholder);
   }
 
-  /* Narrow windows drop the meter before the fader: the number and the slider
-     carry the information, the meter is a secondary cue. */
-  @media (max-width: 640px) {
+  /* Row actions are always visible. Hiding them behind hover was the first
+     version's mistake: a user who cannot see that a row can be renamed, pinned
+     or removed concludes the application cannot do it. They sit quiet at rest
+     and gain contrast on hover, rather than appearing from nothing. */
+  .row-actions {
+    display: flex;
+    gap: 2px;
+  }
+  .row-actions :global(.icon-btn) {
+    color: var(--text-placeholder);
+    transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+  }
+  .app-row:hover .row-actions :global(.icon-btn) {
+    color: var(--text-muted);
+  }
+  .row-actions :global(.icon-btn:hover) {
+    color: var(--text-primary);
+  }
+  .row-actions :global(.is-on) {
+    color: var(--accent);
+  }
+
+  .session-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    list-style: none;
+    margin: 0;
+    padding: var(--space-1) var(--space-2) var(--space-2) 30px;
+    background: var(--bg-cap);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+
+  @media (max-width: 700px) {
     .app-row,
     .app-row.is-compact {
-      grid-template-columns: minmax(0, 1fr) minmax(90px, 1.6fr) 42px 32px;
+      grid-template-columns: minmax(0, 1fr) minmax(90px, 1.6fr) 44px 32px auto;
     }
     .row-meter {
       display: none;

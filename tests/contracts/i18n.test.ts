@@ -66,15 +66,15 @@ describe("catalog parity", () => {
 
 describe("translate", () => {
   it("interpolates named variables", () => {
-    expect(translate("en", "mixer.mute", { app: "Spotify" })).toBe("Mute Spotify");
-    expect(translate("es", "mixer.mute", { app: "Spotify" })).toBe("Silenciar Spotify");
+    expect(translate("en", "app.mute", { app: "Spotify" })).toBe("Mute Spotify");
+    expect(translate("es", "app.mute", { app: "Spotify" })).toBe("Silenciar Spotify");
   });
 
   it("selects the plural form from the count", () => {
-    expect(translate("en", "mixer.count", { count: 1 })).toBe("1 application");
-    expect(translate("en", "mixer.count", { count: 3 })).toBe("3 applications");
-    expect(translate("es", "mixer.count", { count: 1 })).toBe("1 aplicación");
-    expect(translate("es", "mixer.count", { count: 3 })).toBe("3 aplicaciones");
+    expect(translate("en", "app.sessionCount", { count: 1 })).toBe("1 stream");
+    expect(translate("en", "app.sessionCount", { count: 3 })).toBe("3 streams");
+    expect(translate("es", "app.sessionCount", { count: 1 })).toBe("1 pista");
+    expect(translate("es", "app.sessionCount", { count: 3 })).toBe("3 pistas");
   });
 
   it("returns the key itself when a message is missing, so gaps are visible", () => {
@@ -82,7 +82,7 @@ describe("translate", () => {
   });
 
   it("leaves an unknown placeholder visible rather than rendering a gap", () => {
-    expect(translate("en", "mixer.mute", { wrong: "x" })).toContain("{app}");
+    expect(translate("en", "app.mute", { wrong: "x" })).toContain("{app}");
   });
 });
 
@@ -94,10 +94,15 @@ describe("source usage", () => {
     "components/Sidebar.svelte",
     "components/TopBar.svelte",
     "components/Dialog.svelte",
-    "components/AppPicker.svelte",
+    "components/AddAppDialog.svelte",
+    "components/AppInspector.svelte",
+    "components/SessionRow.svelte",
+    "components/SceneBar.svelte",
+    "components/CommandPalette.svelte",
+    "components/EfficiencyToggle.svelte",
     "components/GroupCard.svelte",
     "components/HotkeyCapture.svelte",
-    "views/Mixer.svelte",
+    "views/Applications.svelte",
     "views/Groups.svelte",
     "views/Settings.svelte",
     "views/About.svelte",
@@ -126,7 +131,7 @@ describe("source usage", () => {
     // The sidebar and settings tabs compose keys from a view or tab id. Those
     // are invisible to a literal scan, so the composed results are listed here.
     const composed = [
-      "nav.mixer",
+      "nav.applications",
       "nav.groups",
       "nav.settings",
       "nav.about",

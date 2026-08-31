@@ -6,20 +6,20 @@
  */
 import {
   EVENTS,
+  type Application,
+  type ApplicationRemovedPayload,
   type AppSettings,
-  type AudioSession,
   type MasterState,
   type MixerSnapshot,
   type PeakBatch,
-  type SessionRemovedPayload,
 } from "./api";
 import {
+  applyApplicationAdded,
+  applyApplicationRemoved,
+  applyApplicationUpdated,
   applyEndpointChanged,
   applyMasterUpdated,
   applyPeaks,
-  applySessionAdded,
-  applySessionRemoved,
-  applySessionUpdated,
   audioAvailable,
   settings,
 } from "./stores";
@@ -29,19 +29,24 @@ type Unlisten = () => void;
 /**
  * Subscribes to every backend event. Returns a disposer.
  *
- * Outside a Tauri webview (unit tests, `vite preview`) the dynamic import
- * fails, so the app degrades to whatever `list_sessions` returned instead of
- * crashing on load.
+ * Outside a Tauri webview — unit tests, `vite preview`, the design harness —
+ * the module resolves but its internals are absent, so `listen` throws. Both
+ * that and a failed import land in the same catch, and the app degrades to
+ * whatever `list_applications` returned instead of failing to start.
  */
 export async function installEventListeners(): Promise<Unlisten> {
   try {
     const { listen } = await import("@tauri-apps/api/event");
 
     const disposers = await Promise.all([
-      listen<AudioSession>(EVENTS.sessionAdded, (event) => applySessionAdded(event.payload)),
-      listen<AudioSession>(EVENTS.sessionUpdated, (event) => applySessionUpdated(event.payload)),
-      listen<SessionRemovedPayload>(EVENTS.sessionRemoved, (event) =>
-        applySessionRemoved(event.payload.live_id),
+      listen<Application>(EVENTS.applicationAdded, (event) =>
+        applyApplicationAdded(event.payload),
+      ),
+      listen<Application>(EVENTS.applicationUpdated, (event) =>
+        applyApplicationUpdated(event.payload),
+      ),
+      listen<ApplicationRemovedPayload>(EVENTS.applicationRemoved, (event) =>
+        applyApplicationRemoved(event.payload.app_key),
       ),
       listen<MasterState>(EVENTS.masterUpdated, (event) => applyMasterUpdated(event.payload)),
       listen<MixerSnapshot>(EVENTS.endpointChanged, (event) => applyEndpointChanged(event.payload)),
@@ -55,9 +60,6 @@ export async function installEventListeners(): Promise<Unlisten> {
       for (const dispose of disposers) dispose();
     };
   } catch {
-    // Outside a Tauri WebView the module resolves but its internals are absent,
-    // so `listen` throws rather than the import failing. Both cases land here
-    // and the app degrades to whatever `list_sessions` returned.
     return () => {};
   }
 }

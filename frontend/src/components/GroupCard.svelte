@@ -9,6 +9,7 @@
 
   let {
     group,
+    memberCount,
     isActive,
     isSelected,
     canDelete,
@@ -17,6 +18,7 @@
     onDelete,
   }: {
     group: Group;
+    memberCount: number;
     isActive: boolean;
     isSelected: boolean;
     canDelete: boolean;
@@ -27,8 +29,8 @@
 
   // Three faces plus a counter reads faster than a long wrapping row of icons.
   const PREVIEW_LIMIT = 3;
-  let preview = $derived(group.apps.slice(0, PREVIEW_LIMIT));
-  let overflow = $derived(Math.max(0, group.apps.length - PREVIEW_LIMIT));
+  let preview = $derived(group.app_keys.slice(0, PREVIEW_LIMIT));
+  let overflow = $derived(Math.max(0, memberCount - PREVIEW_LIMIT));
 </script>
 
 <div class="group-card edge-accent" class:is-selected={isSelected} class:is-active={isActive}>
@@ -45,13 +47,13 @@
     </span>
 
     <span class="group-meta">
-      <span class="group-count">{$t("groups.apps", { count: group.apps.length })}</span>
+      <span class="group-count">{$t("groups.apps", { count: memberCount })}</span>
       <span class="group-volume mono">{formatPercent(group.volume)}</span>
     </span>
 
     <span class="group-apps">
-      {#each preview as app (app.app_key)}
-        <AppIcon src={null} name={app.display_name} appKey={app.app_key} size={22} />
+      {#each preview as appKey (appKey)}
+        <AppIcon src={null} name={appKey} appKey={appKey} size={22} />
       {/each}
       {#if overflow > 0}
         <span class="group-overflow mono">+{overflow}</span>

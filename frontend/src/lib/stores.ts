@@ -1,58 +1,91 @@
 import { derived, get, writable, type Readable, type Writable } from "svelte/store";
 import {
+  addApplication as ipcAddApplication,
+  applyScene as ipcApplyScene,
+  captureScene as ipcCaptureScene,
   deleteGroup as ipcDeleteGroup,
+  deleteScene as ipcDeleteScene,
   errorMessage,
   getSettings,
-  listSessions,
+  listApplications,
+  removeApplication as ipcRemoveApplication,
+  reorderApplications as ipcReorderApplications,
   restoreBackup as ipcRestoreBackup,
   saveSettings,
   setActiveGroup as ipcSetActiveGroup,
+  setAppMute,
+  setAppVolume,
   setGroupVolume as ipcSetGroupVolume,
   setHotkeys as ipcSetHotkeys,
   setMasterMute,
   setMasterVolume,
   setSessionMute,
   setSessionVolume,
+  updateApplication as ipcUpdateApplication,
   upsertGroup as ipcUpsertGroup,
+  upsertScene as ipcUpsertScene,
+  type Application,
+  type ApplicationPatch,
   type AppSettings,
-  type AudioSession,
   type Group,
   type HotkeyBinding,
   type MasterState,
   type PeakBatch,
+  type Scene,
 } from "./api";
 import { debounce, matchesQuery, type ViewId } from "./ux";
 
 /* ── Navigation and chrome ──────────────────────────────────────────────── */
 
-export const currentView: Writable<ViewId> = writable("mixer");
+export const currentView: Writable<ViewId> = writable("applications");
 export const searchQuery: Writable<string> = writable("");
 export const selectedGroupId: Writable<string | null> = writable(null);
 export const shortcutOverlayOpen: Writable<boolean> = writable(false);
+export const commandPaletteOpen: Writable<boolean> = writable(false);
+
+/** Application whose detail panel is open, or null. */
+export const inspectedAppKey: Writable<string | null> = writable(null);
+
+/** Applications whose session breakdown is expanded. */
+export const expandedApps: Writable<Set<string>> = writable(new Set());
+
+export function toggleExpanded(appKey: string): void {
+  expandedApps.update((current) => {
+    const next = new Set(current);
+    if (next.has(appKey)) {
+      next.delete(appKey);
+    } else {
+      next.add(appKey);
+    }
+    return next;
+  });
+}
 
 /* ── Audio state ────────────────────────────────────────────────────────── */
 
 export const master: Writable<MasterState | null> = writable(null);
-export const sessions: Writable<AudioSession[]> = writable([]);
+export const applications: Writable<Application[]> = writable([]);
 export const audioAvailable: Writable<boolean> = writable(true);
 export const settings: Writable<AppSettings | null> = writable(null);
 
 /**
- * Peaks live outside `sessions` on purpose. They change 20 times a second and
- * would otherwise invalidate every row's props on every tick, re-rendering the
- * whole list instead of only the meters.
+ * Peaks live outside `applications` on purpose. They change twenty times a
+ * second and would otherwise invalidate every row's props on every tick,
+ * re-rendering the whole list instead of only the meters.
  */
-export const peaks: Writable<Record<string, number>> = writable({});
+export const appPeaks: Writable<Record<string, number>> = writable({});
+export const sessionPeaks: Writable<Record<string, number>> = writable({});
 export const masterPeak: Writable<number> = writable(0);
 
 /**
- * Volumes the user is dragging right now. The UI reads from here so a slider
- * never jumps back when a `session-updated` event arrives mid-drag carrying the
- * value from two frames ago.
+ * Volumes the user is dragging right now. The interface reads from here so a
+ * slider never jumps back when an `application-updated` event arrives mid-drag
+ * carrying the value from two frames ago.
  */
 export const pendingVolumes: Writable<Record<string, number>> = writable({});
 
 export const groups: Readable<Group[]> = derived(settings, ($settings) => $settings?.groups ?? []);
+export const scenes: Readable<Scene[]> = derived(settings, ($settings) => $settings?.scenes ?? []);
 
 export const activeGroupId: Readable<string | null> = derived(
   settings,
@@ -64,18 +97,25 @@ export const activeGroup: Readable<Group | null> = derived(
   ([$groups, $activeId]) => $groups.find((group) => group.id === $activeId) ?? null,
 );
 
-/** Sessions after the user's visibility preferences and the search box. */
-export const visibleSessions: Readable<AudioSession[]> = derived(
-  [sessions, settings, searchQuery],
-  ([$sessions, $settings, $query]) => {
+export const inspectedApp: Readable<Application | null> = derived(
+  [applications, inspectedAppKey],
+  ([$applications, $key]) => $applications.find((app) => app.app_key === $key) ?? null,
+);
+
+/** Applications after the user's visibility preferences and the search box. */
+export const visibleApplications: Readable<Application[]> = derived(
+  [applications, settings, searchQuery],
+  ([$applications, $settings, $query]) => {
     const prefs = $settings?.ui_prefs;
-    return $sessions.filter((session) => {
-      if (session.is_system_sounds && prefs && !prefs.show_system_sounds) return false;
-      if (session.state === "inactive" && prefs && !prefs.show_inactive) return false;
+    return $applications.filter((app) => {
+      if (app.hidden && !(prefs?.show_hidden ?? false)) return false;
+      if (app.is_system_sounds && !(prefs?.show_system_sounds ?? true)) return false;
+      if (!app.running && !(prefs?.show_offline ?? true)) return false;
       return matchesQuery($query, [
-        session.display_name,
-        session.executable_name,
-        session.executable_path,
+        app.display_name,
+        app.custom_name,
+        app.executable_name,
+        app.executable_path,
       ]);
     });
   },
@@ -83,17 +123,45 @@ export const visibleSessions: Readable<AudioSession[]> = derived(
 
 /**
  * Display order. Sorting by live peak would make rows swap places while music
- * plays, so ordering uses stable facts only: audible before idle, then name.
+ * plays, so ordering uses stable facts only: pinned first, then running before
+ * offline, then the user's manual order, then name.
  */
-export function sortSessions(list: AudioSession[]): AudioSession[] {
+export function sortApplications(list: Application[]): Application[] {
   return [...list].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     if (a.is_system_sounds !== b.is_system_sounds) return a.is_system_sounds ? 1 : -1;
-    if ((a.state === "active") !== (b.state === "active")) return a.state === "active" ? -1 : 1;
+    if (a.running !== b.running) return a.running ? -1 : 1;
+    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
     return a.display_name.localeCompare(b.display_name, undefined, { sensitivity: "base" });
   });
 }
 
-export const sortedSessions: Readable<AudioSession[]> = derived(visibleSessions, sortSessions);
+export const sortedApplications: Readable<Application[]> = derived(
+  visibleApplications,
+  sortApplications,
+);
+
+/** Section headers in the list, so offline entries do not look like a bug. */
+export interface AppSection {
+  id: "pinned" | "running" | "offline";
+  apps: Application[];
+}
+
+export const applicationSections: Readable<AppSection[]> = derived(
+  sortedApplications,
+  ($apps) => {
+    const pinned = $apps.filter((app) => app.pinned);
+    const running = $apps.filter((app) => !app.pinned && app.running);
+    const offline = $apps.filter((app) => !app.pinned && !app.running);
+    return (
+      [
+        { id: "pinned", apps: pinned },
+        { id: "running", apps: running },
+        { id: "offline", apps: offline },
+      ] as AppSection[]
+    ).filter((section) => section.apps.length > 0);
+  },
+);
 
 /* ── Toasts ─────────────────────────────────────────────────────────────── */
 
@@ -101,24 +169,59 @@ export interface ToastMessage {
   id: number;
   text: string;
   tone: "info" | "success" | "danger";
+  /** Optional single undo affordance, used by destructive actions. */
+  undo?: () => void;
 }
 
 export const toasts: Writable<ToastMessage[]> = writable([]);
 let toastSeq = 0;
 
-export function pushToast(text: string, tone: ToastMessage["tone"] = "info"): void {
+export function pushToast(
+  text: string,
+  tone: ToastMessage["tone"] = "info",
+  undo?: () => void,
+): void {
   const id = ++toastSeq;
-  toasts.update((list) => [...list, { id, text, tone }]);
-  setTimeout(() => dismissToast(id), tone === "danger" ? 6000 : 3200);
+  toasts.update((list) => [...list, { id, text, tone, undo }]);
+  setTimeout(() => dismissToast(id), undo ? 8000 : tone === "danger" ? 6000 : 3200);
 }
 
 export function dismissToast(id: number): void {
   toasts.update((list) => list.filter((toast) => toast.id !== id));
 }
 
-/* ── Session mutations ──────────────────────────────────────────────────── */
+/* ── Application mutations ──────────────────────────────────────────────── */
 
-/** Optimistic paint during a drag. No IPC — `commitSessionVolume` sends it. */
+/** Optimistic paint during a drag. No IPC — `commitAppVolume` sends it. */
+export function previewAppVolume(appKey: string, volume: number): void {
+  pendingVolumes.update((map) => ({ ...map, [appKey]: volume }));
+}
+
+export async function commitAppVolume(appKey: string, volume: number): Promise<void> {
+  previewAppVolume(appKey, volume);
+  try {
+    await setAppVolume(appKey, volume);
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+    pendingVolumes.update(({ [appKey]: _dropped, ...rest }) => rest);
+  }
+}
+
+export async function toggleAppMute(app: Application): Promise<void> {
+  const next = !app.muted;
+  applications.update((list) =>
+    list.map((item) => (item.app_key === app.app_key ? { ...item, muted: next } : item)),
+  );
+  try {
+    await setAppMute(app.app_key, next);
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+    applications.update((list) =>
+      list.map((item) => (item.app_key === app.app_key ? { ...item, muted: app.muted } : item)),
+    );
+  }
+}
+
 export function previewSessionVolume(liveId: string, volume: number): void {
   pendingVolumes.update((map) => ({ ...map, [liveId]: volume }));
 }
@@ -129,27 +232,85 @@ export async function commitSessionVolume(liveId: string, volume: number): Promi
     await setSessionVolume(liveId, volume);
   } catch (error) {
     pushToast(errorMessage(error), "danger");
-    // Drop the optimistic value so the next backend event wins.
     pendingVolumes.update(({ [liveId]: _dropped, ...rest }) => rest);
   }
 }
 
-export async function toggleSessionMute(session: AudioSession): Promise<void> {
-  const next = !session.muted;
-  sessions.update((list) =>
-    list.map((item) => (item.live_id === session.live_id ? { ...item, muted: next } : item)),
-  );
+export async function toggleSessionMute(liveId: string, muted: boolean): Promise<void> {
   try {
-    await setSessionMute(session.live_id, next);
+    await setSessionMute(liveId, muted);
   } catch (error) {
     pushToast(errorMessage(error), "danger");
-    sessions.update((list) =>
-      list.map((item) =>
-        item.live_id === session.live_id ? { ...item, muted: session.muted } : item,
-      ),
-    );
   }
 }
+
+export async function patchApplication(
+  appKey: string,
+  patch: ApplicationPatch,
+): Promise<void> {
+  // Applied locally first so a pin or rename lands on the next frame rather
+  // than after a round trip.
+  applications.update((list) =>
+    list.map((item) => (item.app_key === appKey ? { ...item, ...patch } : item)),
+  );
+  try {
+    const saved = await ipcUpdateApplication(appKey, patch);
+    applications.update((list) =>
+      list.map((item) => (item.app_key === appKey ? saved : item)),
+    );
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+    await refreshMixer();
+  }
+}
+
+export async function addApplicationFromPath(path: string): Promise<Application | null> {
+  try {
+    const added = await ipcAddApplication(path);
+    applications.update((list) =>
+      list.some((item) => item.app_key === added.app_key)
+        ? list.map((item) => (item.app_key === added.app_key ? added : item))
+        : [...list, added],
+    );
+    return added;
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+    return null;
+  }
+}
+
+/**
+ * Forgets NovaMixer's settings for an application. The application itself is
+ * untouched, which the confirmation copy states explicitly.
+ */
+export async function forgetApplication(app: Application): Promise<boolean> {
+  try {
+    await ipcRemoveApplication(app.app_key);
+    applications.update((list) => list.filter((item) => item.app_key !== app.app_key));
+    if (get(inspectedAppKey) === app.app_key) inspectedAppKey.set(null);
+    return true;
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+    return false;
+  }
+}
+
+export async function reorder(appKeys: string[]): Promise<void> {
+  applications.update((list) => {
+    const order = new Map(appKeys.map((key, index) => [key, index]));
+    return list.map((item) => ({
+      ...item,
+      sort_order: order.get(item.app_key) ?? item.sort_order,
+    }));
+  });
+  try {
+    await ipcReorderApplications(appKeys);
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+  }
+}
+
+/* ── Master ─────────────────────────────────────────────────────────────── */
 
 export function previewMasterVolume(volume: number): void {
   master.update((state) => (state ? { ...state, volume } : state));
@@ -177,7 +338,7 @@ export async function toggleMasterMute(): Promise<void> {
   }
 }
 
-/* ── Group mutations ────────────────────────────────────────────────────── */
+/* ── Groups ─────────────────────────────────────────────────────────────── */
 
 export async function commitGroupVolume(groupId: string, volume: number): Promise<void> {
   settings.update((current) =>
@@ -242,6 +403,65 @@ export async function activateGroup(groupId: string | null): Promise<void> {
   }
 }
 
+/* ── Scenes ─────────────────────────────────────────────────────────────── */
+
+export async function saveScene(scene: Scene): Promise<Scene | null> {
+  try {
+    const saved = await ipcUpsertScene(scene);
+    settings.update((current) => {
+      if (!current) return current;
+      const exists = current.scenes.some((item) => item.id === saved.id);
+      return {
+        ...current,
+        scenes: exists
+          ? current.scenes.map((item) => (item.id === saved.id ? saved : item))
+          : [...current.scenes, saved],
+      };
+    });
+    return saved;
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+    return null;
+  }
+}
+
+export async function removeScene(sceneId: string): Promise<boolean> {
+  try {
+    await ipcDeleteScene(sceneId);
+    settings.update((current) =>
+      current
+        ? { ...current, scenes: current.scenes.filter((scene) => scene.id !== sceneId) }
+        : current,
+    );
+    return true;
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+    return false;
+  }
+}
+
+export async function runScene(sceneId: string): Promise<void> {
+  try {
+    await ipcApplyScene(sceneId);
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+  }
+}
+
+/** Snapshots the levels the user has already dialled in by ear. */
+export async function captureCurrentAsScene(name: string): Promise<Scene | null> {
+  try {
+    const created = await ipcCaptureScene(name);
+    settings.update((current) =>
+      current ? { ...current, scenes: [...current.scenes, created] } : current,
+    );
+    return created;
+  } catch (error) {
+    pushToast(errorMessage(error), "danger");
+    return null;
+  }
+}
+
 export async function applyHotkeys(hotkeys: HotkeyBinding[]): Promise<void> {
   try {
     await ipcSetHotkeys(hotkeys);
@@ -301,9 +521,9 @@ export async function restoreSettingsBackup(): Promise<boolean> {
 
 export async function refreshMixer(): Promise<void> {
   try {
-    const snapshot = await listSessions();
+    const snapshot = await listApplications();
     master.set(snapshot.master);
-    sessions.set(snapshot.sessions);
+    applications.set(snapshot.applications);
     pendingVolumes.set({});
     audioAvailable.set(true);
   } catch {
@@ -312,27 +532,29 @@ export async function refreshMixer(): Promise<void> {
 }
 
 /* ── Event application ──────────────────────────────────────────────────── */
-/* These are pure state transitions so the integration tests can drive them
-   without a Tauri runtime. `events.ts` wires them to the real listeners. */
+/* Pure state transitions, so the integration tests can drive them without a
+   Tauri runtime. `events.ts` wires them to the real listeners. */
 
-export function applySessionAdded(session: AudioSession): void {
-  sessions.update((list) =>
-    list.some((item) => item.live_id === session.live_id) ? list : [...list, session],
+export function applyApplicationAdded(app: Application): void {
+  applications.update((list) =>
+    list.some((item) => item.app_key === app.app_key)
+      ? list.map((item) => (item.app_key === app.app_key ? app : item))
+      : [...list, app],
   );
 }
 
-export function applySessionUpdated(session: AudioSession): void {
-  sessions.update((list) =>
-    list.map((item) => (item.live_id === session.live_id ? session : item)),
+export function applyApplicationUpdated(app: Application): void {
+  applications.update((list) =>
+    list.map((item) => (item.app_key === app.app_key ? app : item)),
   );
   // The authoritative value has landed, so the optimistic one is obsolete.
-  pendingVolumes.update(({ [session.live_id]: _dropped, ...rest }) => rest);
+  pendingVolumes.update(({ [app.app_key]: _dropped, ...rest }) => rest);
 }
 
-export function applySessionRemoved(liveId: string): void {
-  sessions.update((list) => list.filter((item) => item.live_id !== liveId));
-  peaks.update(({ [liveId]: _dropped, ...rest }) => rest);
-  pendingVolumes.update(({ [liveId]: _dropped, ...rest }) => rest);
+export function applyApplicationRemoved(appKey: string): void {
+  applications.update((list) => list.filter((item) => item.app_key !== appKey));
+  appPeaks.update(({ [appKey]: _dropped, ...rest }) => rest);
+  pendingVolumes.update(({ [appKey]: _dropped, ...rest }) => rest);
 }
 
 export function applyMasterUpdated(state: MasterState): void {
@@ -342,18 +564,26 @@ export function applyMasterUpdated(state: MasterState): void {
 /** An endpoint swap replaces the world; merging would keep dead sessions. */
 export function applyEndpointChanged(snapshot: {
   master: MasterState;
-  sessions: AudioSession[];
+  applications: Application[];
 }): void {
   master.set(snapshot.master);
-  sessions.set(snapshot.sessions);
-  peaks.set({});
+  applications.set(snapshot.applications);
+  appPeaks.set({});
+  sessionPeaks.set({});
   pendingVolumes.set({});
   audioAvailable.set(true);
 }
 
 export function applyPeaks(batch: PeakBatch): void {
-  const next: Record<string, number> = {};
-  for (const entry of batch.sessions) next[entry.live_id] = entry.peak;
-  peaks.set(next);
+  const nextApps: Record<string, number> = {};
+  const nextSessions: Record<string, number> = {};
+  for (const entry of batch.applications) {
+    nextApps[entry.app_key] = entry.peak;
+    for (const session of entry.sessions) {
+      nextSessions[session.live_id] = session.peak;
+    }
+  }
+  appPeaks.set(nextApps);
+  sessionPeaks.set(nextSessions);
   masterPeak.set(batch.master_peak);
 }

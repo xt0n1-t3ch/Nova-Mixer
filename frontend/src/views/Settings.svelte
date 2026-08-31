@@ -4,6 +4,7 @@
   import type { AppSettings, Density, HotkeyAction, Theme } from "../lib/api";
   import { openDataFolder } from "../lib/api";
   import Dialog from "../components/Dialog.svelte";
+  import EfficiencyToggle from "../components/EfficiencyToggle.svelte";
   import HotkeyCapture from "../components/HotkeyCapture.svelte";
   import Select from "../components/Select.svelte";
   import {
@@ -183,6 +184,11 @@
               <span class="toggle-slider"></span>
             </label>
           </div>
+
+          <EfficiencyToggle
+            enabled={config.efficiency_mode}
+            onChange={(enabled) => patch({ efficiency_mode: enabled })}
+          />
         </section>
       {:else if tab === "hotkeys"}
         <section class="surface">

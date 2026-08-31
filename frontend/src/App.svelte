@@ -7,11 +7,13 @@
   import TopBar from "./components/TopBar.svelte";
   import Toast from "./components/Toast.svelte";
   import ShortcutOverlay from "./components/ShortcutOverlay.svelte";
-  import Mixer from "./views/Mixer.svelte";
+  import CommandPalette from "./components/CommandPalette.svelte";
+  import Applications from "./views/Applications.svelte";
   import Groups from "./views/Groups.svelte";
   import Settings from "./views/Settings.svelte";
   import About from "./views/About.svelte";
   import {
+    commandPaletteOpen,
     currentView,
     loadSettings,
     persistSettings,
@@ -95,9 +97,9 @@
     };
   });
 
-  /** Meters only need to run while the mixer is on screen. */
+  /** Meters only need to run while the application list is on screen. */
   $effect(() => {
-    const active = $currentView === "mixer";
+    const active = $currentView === "applications";
     void setMeteringActive(active).catch(() => {
       /* backend not ready yet; the next view change re-sends it */
     });
@@ -105,7 +107,7 @@
 
   onMount(() => {
     const onVisibility = (): void => {
-      void setMeteringActive($currentView === "mixer" && !document.hidden).catch(() => {});
+      void setMeteringActive($currentView === "applications" && !document.hidden).catch(() => {});
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
@@ -123,6 +125,15 @@
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         (target instanceof HTMLElement && target.isContentEditable);
+
+      // The palette is reachable from anywhere, including a text field, because
+      // it is the fastest route to any action in the app.
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        commandPaletteOpen.update((open) => !open);
+        return;
+      }
+
       if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (event.key === "?") {
@@ -135,10 +146,10 @@
         pendingGo = false;
         if (goTimer) clearTimeout(goTimer);
         const map: Record<string, string> = {
-          m: "mixer",
+          a: "applications",
           g: "groups",
           s: "settings",
-          a: "about",
+          i: "about",
         };
         const view = map[event.key.toLowerCase()];
         if (view && isViewId(view)) {
@@ -190,9 +201,9 @@
 
   <main class="app-main">
     <div class="main-inner">
-      {#if $currentView === "mixer"}
-        <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-mixer">
-          <Mixer />
+      {#if $currentView === "applications"}
+        <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-applications">
+          <Applications />
         </div>
       {:else if $currentView === "groups"}
         <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-groups">
@@ -213,6 +224,7 @@
 
 <Toast />
 <ShortcutOverlay />
+<CommandPalette />
 
 <style>
   .app-shell {

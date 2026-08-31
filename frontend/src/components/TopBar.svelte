@@ -8,7 +8,13 @@
   import Moon from "@lucide/svelte/icons/moon";
   import Sun from "@lucide/svelte/icons/sun";
   import Keyboard from "@lucide/svelte/icons/keyboard";
-  import { currentView, searchQuery, shortcutOverlayOpen } from "../lib/stores";
+  import Command from "@lucide/svelte/icons/command";
+  import {
+    commandPaletteOpen,
+    currentView,
+    searchQuery,
+    shortcutOverlayOpen,
+  } from "../lib/stores";
   import { t } from "../lib/i18n/index";
 
   let { onToggleTheme, theme }: { onToggleTheme: () => void; theme: string } = $props();
@@ -55,7 +61,7 @@
     await getCurrentWindow().close();
   }
 
-  let showSearch = $derived($currentView === "mixer");
+  let showSearch = $derived($currentView === "applications");
 </script>
 
 <header class="topbar" data-tauri-drag-region>
@@ -76,6 +82,15 @@
   </div>
 
   <div class="topbar-right">
+    <button
+      class="icon-btn"
+      onclick={() => commandPaletteOpen.set(true)}
+      title={$t("palette.title")}
+      aria-label={$t("palette.title")}
+    >
+      <Command size={15} />
+    </button>
+
     <button
       class="icon-btn"
       onclick={() => shortcutOverlayOpen.set(true)}

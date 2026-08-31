@@ -1,10 +1,18 @@
 <script lang="ts">
+  /**
+   * Groups: one volume across several applications, plus what happens when a
+   * member launches.
+   *
+   * A group holds `app_key` strings now rather than its own copy of each
+   * application's details — the application registry already owns those, and
+   * duplicating them is how the two drifted apart in the previous version.
+   */
   import Plus from "@lucide/svelte/icons/plus";
   import Layers from "@lucide/svelte/icons/layers";
   import X from "@lucide/svelte/icons/x";
-  import type { AppBinding, Group } from "../lib/api";
+  import Check from "@lucide/svelte/icons/check";
+  import type { Group } from "../lib/api";
   import AppIcon from "../components/AppIcon.svelte";
-  import AppPicker from "../components/AppPicker.svelte";
   import Dialog from "../components/Dialog.svelte";
   import EmptyState from "../components/EmptyState.svelte";
   import GroupCard from "../components/GroupCard.svelte";
@@ -12,40 +20,52 @@
   import {
     activateGroup,
     activeGroupId,
+    applications,
     commitGroupVolume,
     groups,
     pushToast,
     removeGroup,
     saveGroup,
     selectedGroupId,
-    sessions,
   } from "../lib/stores";
   import { formatPercent, volumeValueText } from "../lib/volume";
+  import { matchesQuery } from "../lib/ux";
   import { t } from "../lib/i18n/index";
 
   let nameDialog = $state<{ mode: "create" | "rename"; value: string; groupId?: string } | null>(
     null,
   );
   let deleteTarget = $state<Group | null>(null);
-  let pickerOpen = $state(false);
+  let memberPickerOpen = $state(false);
+  let memberQuery = $state("");
 
-  let selected = $derived($groups.find((group) => group.id === $selectedGroupId) ?? $groups[0] ?? null);
+  let selected = $derived(
+    $groups.find((group) => group.id === $selectedGroupId) ?? $groups[0] ?? null,
+  );
   let canDelete = $derived($groups.length > 1);
 
-  // Draft volume while dragging, so the slider is not fighting store updates.
+  /** Draft volume while dragging, so the slider is not fighting store updates. */
   let draftVolume = $state<number | null>(null);
   let shownVolume = $derived(draftVolume ?? selected?.volume ?? 0);
 
+  let members = $derived(
+    selected
+      ? selected.app_keys
+          .map((key) => $applications.find((app) => app.app_key === key))
+          .filter((app): app is NonNullable<typeof app> => app !== undefined)
+      : [],
+  );
+
+  let candidates = $derived(
+    selected
+      ? $applications
+          .filter((app) => !selected.app_keys.includes(app.app_key) && !app.is_system_sounds)
+          .filter((app) => matchesQuery(memberQuery, [app.display_name, app.executable_name]))
+      : [],
+  );
+
   function newGroupId(): string {
     return crypto.randomUUID();
-  }
-
-  function openCreate(): void {
-    nameDialog = { mode: "create", value: "" };
-  }
-
-  function openRename(group: Group): void {
-    nameDialog = { mode: "rename", value: group.name, groupId: group.id };
   }
 
   async function confirmName(): Promise<void> {
@@ -60,7 +80,7 @@
         name,
         is_default: $groups.length === 0,
         volume: 1,
-        apps: [],
+        app_keys: [],
         startup_volume: null,
         auto_mute_on_launch: false,
         hotkeys_enabled: true,
@@ -90,15 +110,14 @@
     await saveGroup({ ...selected, ...patch });
   }
 
-  async function addApps(bindings: AppBinding[]): Promise<void> {
+  async function addMember(appKey: string): Promise<void> {
     if (!selected) return;
-    await patchSelected({ apps: [...selected.apps, ...bindings] });
-    pickerOpen = false;
+    await patchSelected({ app_keys: [...selected.app_keys, appKey] });
   }
 
-  async function removeApp(appKey: string): Promise<void> {
+  async function removeMember(appKey: string): Promise<void> {
     if (!selected) return;
-    await patchSelected({ apps: selected.apps.filter((app) => app.app_key !== appKey) });
+    await patchSelected({ app_keys: selected.app_keys.filter((key) => key !== appKey) });
   }
 </script>
 
@@ -109,7 +128,7 @@
       <p class="view-subtitle">{$t("view.groups.subtitle")}</p>
     </div>
     <div class="header-actions">
-      <button class="btn btn-primary" onclick={openCreate}>
+      <button class="btn btn-primary" onclick={() => (nameDialog = { mode: "create", value: "" })}>
         <Plus size={14} />
         {$t("groups.new")}
       </button>
@@ -119,7 +138,7 @@
   {#if $groups.length === 0}
     <EmptyState icon={Layers} title={$t("groups.empty.title")} body={$t("groups.empty.body")}>
       {#snippet action()}
-        <button class="btn btn-primary" onclick={openCreate}>
+        <button class="btn btn-primary" onclick={() => (nameDialog = { mode: "create", value: "" })}>
           <Plus size={14} />
           {$t("groups.new")}
         </button>
@@ -131,6 +150,7 @@
         {#each $groups as group (group.id)}
           <GroupCard
             {group}
+            memberCount={group.app_keys.length}
             isActive={group.id === $activeGroupId}
             isSelected={group.id === selected?.id}
             {canDelete}
@@ -138,7 +158,8 @@
               selectedGroupId.set(group.id);
               draftVolume = null;
             }}
-            onRename={() => openRename(group)}
+            onRename={() =>
+              (nameDialog = { mode: "rename", value: group.name, groupId: group.id })}
             onDelete={() => (deleteTarget = group)}
           />
         {/each}
@@ -151,7 +172,7 @@
             <div class="detail-head">
               <div>
                 <h2 class="section-heading">{group.name}</h2>
-                <p class="section-sub">{$t("groups.apps", { count: group.apps.length })}</p>
+                <p class="section-sub">{$t("groups.apps", { count: group.app_keys.length })}</p>
               </div>
               {#if group.id !== $activeGroupId}
                 <button class="btn btn-sm" onclick={() => void activateGroup(group.id)}>
@@ -165,7 +186,7 @@
                 value={shownVolume}
                 size="lg"
                 ariaLabel={$t("groups.groupVolume", { group: group.name })}
-                ariaValueText={volumeValueText(shownVolume, false, $t("mixer.muted"))}
+                ariaValueText={volumeValueText(shownVolume, false, $t("app.muted"))}
                 onInput={(value) => (draftVolume = value)}
                 onCommit={(value) => {
                   draftVolume = null;
@@ -178,25 +199,37 @@
 
           <section class="surface">
             <div class="detail-head">
-              <h3 class="section-heading">{$t("groups.linkedApps")}</h3>
-              <button class="btn btn-sm" onclick={() => (pickerOpen = true)}>
+              <h3 class="section-heading">{$t("groups.members")}</h3>
+              <button
+                class="btn btn-sm"
+                onclick={() => {
+                  memberQuery = "";
+                  memberPickerOpen = true;
+                }}
+              >
                 <Plus size={13} />
-                {$t("groups.addApp")}
+                {$t("groups.addMember")}
               </button>
             </div>
 
-            {#if group.apps.length === 0}
-              <p class="section-sub empty-line">{$t("groups.noApps.body")}</p>
+            {#if members.length === 0}
+              <p class="section-sub empty-line">{$t("groups.noMembers")}</p>
             {:else}
-              <ul class="app-chips">
-                {#each group.apps as app (app.app_key)}
-                  <li class="app-chip">
-                    <AppIcon src={null} name={app.display_name} appKey={app.app_key} size={22} />
+              <ul class="member-chips">
+                {#each members as app (app.app_key)}
+                  <li class="member-chip">
+                    <AppIcon
+                      src={app.icon}
+                      name={app.display_name}
+                      appKey={app.app_key}
+                      size={20}
+                      dimmed={!app.running}
+                    />
                     <span class="truncate">{app.display_name}</span>
                     <button
                       class="icon-btn icon-btn-sm"
-                      onclick={() => void removeApp(app.app_key)}
-                      aria-label={$t("groups.removeApp", { app: app.display_name })}
+                      onclick={() => void removeMember(app.app_key)}
+                      aria-label={$t("groups.removeMember", { app: app.display_name })}
                     >
                       <X size={12} />
                     </button>
@@ -251,11 +284,13 @@
                 <Range
                   value={group.startup_volume}
                   ariaLabel={$t("groups.startupVolume")}
-                  ariaValueText={volumeValueText(group.startup_volume, false, $t("mixer.muted"))}
+                  ariaValueText={volumeValueText(group.startup_volume, false, $t("app.muted"))}
                   onInput={() => {}}
                   onCommit={(value) => void patchSelected({ startup_volume: value })}
                 />
-                <output class="detail-value mono" for="">{formatPercent(group.startup_volume)}</output>
+                <output class="detail-value mono" for="">
+                  {formatPercent(group.startup_volume)}
+                </output>
               </div>
             {/if}
 
@@ -301,8 +336,14 @@
       />
     </label>
     {#snippet footer()}
-      <button class="btn btn-ghost" onclick={() => (nameDialog = null)}>{$t("common.cancel")}</button>
-      <button class="btn btn-primary" disabled={!dialog.value.trim()} onclick={() => void confirmName()}>
+      <button class="btn btn-ghost" onclick={() => (nameDialog = null)}>
+        {$t("common.cancel")}
+      </button>
+      <button
+        class="btn btn-primary"
+        disabled={!dialog.value.trim()}
+        onclick={() => void confirmName()}
+      >
         {dialog.mode === "create" ? $t("common.add") : $t("common.save")}
       </button>
     {/snippet}
@@ -319,19 +360,57 @@
     onClose={() => (deleteTarget = null)}
   >
     {#snippet footer()}
-      <button class="btn btn-ghost" onclick={() => (deleteTarget = null)}>{$t("common.cancel")}</button>
-      <button class="btn btn-danger" onclick={() => void confirmDelete()}>{$t("common.delete")}</button>
+      <button class="btn btn-ghost" onclick={() => (deleteTarget = null)}>
+        {$t("common.cancel")}
+      </button>
+      <button class="btn btn-danger" onclick={() => void confirmDelete()}>
+        {$t("common.delete")}
+      </button>
     {/snippet}
   </Dialog>
 {/if}
 
-{#if pickerOpen && selected}
-  <AppPicker
-    sessions={$sessions}
-    excludeKeys={selected.apps.map((app) => app.app_key)}
-    onClose={() => (pickerOpen = false)}
-    onConfirm={(bindings) => void addApps(bindings)}
-  />
+{#if memberPickerOpen && selected}
+  <Dialog
+    title={$t("groups.addMember")}
+    description={$t("groups.addMemberHint")}
+    width="440px"
+    onClose={() => (memberPickerOpen = false)}
+  >
+    <input
+      type="search"
+      bind:value={memberQuery}
+      placeholder={$t("groups.searchApps")}
+      aria-label={$t("groups.searchApps")}
+      class="member-search"
+    />
+    {#if candidates.length === 0}
+      <p class="section-sub empty-line">{$t("groups.noCandidates")}</p>
+    {:else}
+      <ul class="candidate-list">
+        {#each candidates as app (app.app_key)}
+          <li>
+            <button class="candidate" onclick={() => void addMember(app.app_key)}>
+              <AppIcon
+                src={app.icon}
+                name={app.display_name}
+                appKey={app.app_key}
+                size={26}
+                dimmed={!app.running}
+              />
+              <span class="truncate">{app.display_name}</span>
+              <Check size={13} class="candidate-add" />
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#snippet footer()}
+      <button class="btn btn-primary" onclick={() => (memberPickerOpen = false)}>
+        {$t("common.done")}
+      </button>
+    {/snippet}
+  </Dialog>
 {/if}
 
 <style>
@@ -387,7 +466,7 @@
     color: var(--text-muted);
   }
 
-  .app-chips {
+  .member-chips {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
@@ -395,7 +474,7 @@
     margin: 0;
     padding: 0;
   }
-  .app-chip {
+  .member-chip {
     display: flex;
     align-items: center;
     gap: var(--space-2);
@@ -406,6 +485,50 @@
     font-size: var(--fs-sm);
     color: var(--text-secondary);
     max-width: 240px;
+  }
+
+  .member-search {
+    margin-bottom: var(--space-3);
+  }
+
+  .candidate-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .candidate {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    text-align: left;
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+  }
+  .candidate:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+  }
+  .candidate:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-ring);
+  }
+  .candidate :global(.candidate-add) {
+    margin-left: auto;
+    color: var(--accent);
+    opacity: 0;
+    flex-shrink: 0;
+  }
+  .candidate:hover :global(.candidate-add),
+  .candidate:focus-visible :global(.candidate-add) {
+    opacity: 1;
   }
 
   .field {

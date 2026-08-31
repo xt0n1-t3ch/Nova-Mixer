@@ -28,6 +28,7 @@
     resetTo,
     size = "md",
     tone = "accent",
+    indeterminate = false,
   }: {
     /** Linear scalar, 0.0–1.0. */
     value?: number;
@@ -45,6 +46,13 @@
     resetTo?: number;
     size?: "sm" | "md" | "lg";
     tone?: "accent" | "success" | "warning" | "danger";
+    /**
+     * The underlying values disagree and no single level is true yet. The track
+     * shows a hatch rather than a fill, because inventing an average would show
+     * a number that is not any session's actual volume. The first move resolves
+     * it by synchronizing everything.
+     */
+    indeterminate?: boolean;
   } = $props();
 
   let dragging = $state(false);
@@ -114,6 +122,7 @@
   class:is-dragging={dragging}
   class:is-muted={muted}
   class:is-disabled={disabled}
+  class:is-indeterminate={indeterminate}
   data-size={size}
   data-tone={tone}
   style:--range-percent="{percent}%"
@@ -217,6 +226,17 @@
 
   .range.is-muted .range-fill {
     background: var(--slider-fill-muted);
+  }
+
+  /* Sessions disagree: a hatched full-width track says "no single value" far
+     more honestly than a fill drawn at a made-up average. */
+  .range.is-indeterminate .range-fill {
+    width: 100%;
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--slider-fill-muted) 0 4px,
+      transparent 4px 8px
+    );
   }
 
   .range.is-disabled {

@@ -21,15 +21,15 @@ export function motionDuration(ms: number): number {
   return reducedMotion() ? 0 : ms;
 }
 
-export type ViewId = "mixer" | "groups" | "settings" | "about";
+export type ViewId = "applications" | "groups" | "settings" | "about";
 
-export const VIEW_IDS: readonly ViewId[] = ["mixer", "groups", "settings", "about"];
+export const VIEW_IDS: readonly ViewId[] = ["applications", "groups", "settings", "about"];
 
 export function isViewId(value: string): value is ViewId {
   return (VIEW_IDS as readonly string[]).includes(value);
 }
 
-/** Case-insensitive substring match over a session's user-visible identifiers. */
+/** Case-insensitive substring match over an item's user-visible identifiers. */
 export function matchesQuery(
   query: string,
   fields: readonly (string | null | undefined)[],
@@ -108,14 +108,55 @@ export interface Shortcut {
 }
 
 export const SHORTCUTS: readonly Shortcut[] = [
+  { keys: ["mod", "k"], descriptionKey: "shortcut.commandPalette" },
   { keys: ["/"], descriptionKey: "shortcut.focusSearch" },
-  { keys: ["g", "m"], descriptionKey: "shortcut.goMixer" },
+  { keys: ["g", "a"], descriptionKey: "shortcut.goApplications" },
   { keys: ["g", "g"], descriptionKey: "shortcut.goGroups" },
   { keys: ["g", "s"], descriptionKey: "shortcut.goSettings" },
   { keys: ["m"], descriptionKey: "shortcut.toggleMasterMute" },
   { keys: ["d"], descriptionKey: "shortcut.toggleDensity" },
   { keys: ["esc"], descriptionKey: "shortcut.closeDialog" },
 ];
+
+/**
+ * Ranks items by subsequence match, so `"dsc"` finds `"Discord"`.
+ *
+ * A plain `includes` would miss the abbreviations people actually type into a
+ * command palette. Items are scored by how tightly the query is packed, which
+ * puts a contiguous match ahead of characters scattered across a long title.
+ */
+export function fuzzyRank<T>(query: string, items: readonly T[], text: (item: T) => string): T[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [...items];
+
+  const scored: { item: T; score: number }[] = [];
+  for (const item of items) {
+    const score = subsequenceScore(needle, text(item).toLowerCase());
+    if (score !== null) scored.push({ item, score });
+  }
+  scored.sort((a, b) => a.score - b.score);
+  return scored.map((entry) => entry.item);
+}
+
+/** Lower is better. Returns null when the query is not a subsequence at all. */
+function subsequenceScore(needle: string, haystack: string): number | null {
+  const direct = haystack.indexOf(needle);
+  if (direct >= 0) return direct === 0 ? 0 : 1 + direct;
+
+  let index = 0;
+  let firstHit = -1;
+  let lastHit = -1;
+  for (let position = 0; position < haystack.length && index < needle.length; position++) {
+    if (haystack[position] === needle[index]) {
+      if (firstHit < 0) firstHit = position;
+      lastHit = position;
+      index += 1;
+    }
+  }
+  if (index !== needle.length) return null;
+  // Penalise a match spread thinly across the string.
+  return 100 + (lastHit - firstHit) + firstHit;
+}
 
 /** Human label for a Tauri accelerator, e.g. `"AudioVolumeUp"` → `"Audio Volume Up"`. */
 export function formatAccelerator(accelerator: string | null): string | null {
