@@ -1,0 +1,43 @@
+{
+  "Language": 0,
+  "VolumeStepPercent": 5,
+  "SmartVolume": true,
+  "LaunchOnStartup": false,
+  "StartMinimized": false,
+  "MinimizeToTray": true,
+  "AutoSave": true,
+  "SidebarCollapsed": false,
+  "ActiveGroupId": "bd76d0b8-18fb-40a4-945f-b826bff0474c",
+  "DefaultGroupId": "bd76d0b8-18fb-40a4-945f-b826bff0474c",
+  "VolumeUpKey": 175,
+  "VolumeDownKey": 174,
+  "MuteKey": 173,
+  "Groups": [
+    {
+      "Id": "bd76d0b8-18fb-40a4-945f-b826bff0474c",
+      "Name": "Main",
+      "IsDefault": true,
+      "VolumePercent": 37.5,
+      "Processes": [
+        {
+          "ProcessName": "msedge.exe",
+          "DisplayName": "msedge",
+          "ExePath": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        },
+        {
+          "ProcessName": "thorium.exe",
+          "DisplayName": "thorium",
+          "ExePath": "C:\\Users\\xt0n1\\AppData\\Local\\Thorium\\Application\\thorium.exe"
+        },
+        {
+          "ProcessName": "Spotify.exe",
+          "DisplayName": "Spotify",
+          "ExePath": "C:\\Users\\xt0n1\\AppData\\Roaming\\Spotify\\Spotify.exe"
+        }
+      ],
+      "StartupVolumePercent": null,
+      "AutoMuteOnLaunch": false,
+      "EnableHotkeys": true
+    }
+  ]
+}

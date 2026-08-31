@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "NovaMixer",
+  "version": "2.0.0",
+  "identifier": "io.github.xt0n1-t3ch.novamixer",
+  "build": {
+    "beforeBuildCommand": "pnpm -w run prebuild:kill && pnpm --filter novamixer-frontend build",
+    "beforeDevCommand": "pnpm --filter novamixer-frontend dev",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [{ "title": "NovaMixer", "width": 1080, "height": 720, "minWidth": 860, "minHeight": 560, "resizable": true, "decorations": false, "transparent": false, "shadow": true, "center": true, "label": "main" }],
+    "security": { "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost" }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "publisher": "xt0n1",
+    "icon": ["icons/32x32.png", "icons/64x64.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.ico"],
+    "category": "Utility",
+    "shortDescription": "Per-application Windows volume control",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": { "installMode": "currentUser", "installerIcon": "icons/icon.ico", "compression": "lzma" },
+      "wix": { "language": ["en-US"], "upgradeCode": "7c6807ae-7820-4c2b-9d17-b7cf82224409" }
+    }
+  }
+}

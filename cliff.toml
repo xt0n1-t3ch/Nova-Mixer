@@ -1,0 +1,22 @@
+[changelog]
+header = """
+All notable changes to NovaMixer are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+body = """{% for group, commits in commits | group_by(attribute="group") %}{% for commit in commits %}
+- {{ commit.message | split(pat="
+") | first | trim }}{% endfor %}{% endfor %}"""
+trim = true
+footer = ""
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_parsers = [
+  { message = "^feat", group = "Added" }, { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Changed" }, { message = "^revert", group = "Removed" },
+  { message = "^docs", skip = true }, { message = "^chore", skip = true }, { message = "^ci", skip = true }
+]
+tag_pattern = "v[0-9]+\.[0-9]+\.[0-9]+$"
+sort_commits = "newest"

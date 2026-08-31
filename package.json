@@ -1,0 +1,18 @@
+{
+  "name": "novamixer",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "prebuild:kill": "node scripts/kill-novamixer.mjs",
+    "check": "pnpm --filter novamixer-frontend check",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "fmt:rust": "cargo fmt --all",
+    "fmt:rust:check": "cargo fmt --all -- --check",
+    "test": "task test",
+    "test:e2e": "pnpm --filter novamixer-frontend exec playwright test"
+  },
+  "devDependencies": { "@tauri-apps/cli": "^2.0.0" },
+  "packageManager": "pnpm@9.0.0"
+}

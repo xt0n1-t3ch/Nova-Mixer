@@ -1,0 +1,14 @@
+[product]
+name = "NovaMixer"
+version = "2.0.0"
+identifier = "io.github.xt0n1-t3ch.novamixer"
+author = "xt0n1"
+repository = "https://github.com/xt0n1-t3ch/NovaMixer"
+
+[links]
+releases = "https://github.com/xt0n1-t3ch/NovaMixer/releases"
+issues = "https://github.com/xt0n1-t3ch/NovaMixer/issues"
+author = "https://github.com/xt0n1-t3ch"
+
+[distribution.portable]
+data_marker = "portable.flag"

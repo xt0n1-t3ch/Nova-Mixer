@@ -1,0 +1,97 @@
+use clap::{Parser, Subcommand};
+use novamixer_application::NovaMixerApplication;
+use serde::Serialize;
+
+#[derive(Parser)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+#[derive(Subcommand)]
+enum Command {
+    Doctor {
+        #[arg(long)]
+        json: bool,
+        #[arg(long, value_names = ["APP_KEY", "SCALAR"], num_args = 2)]
+        set_volume: Option<Vec<String>>,
+    },
+}
+#[derive(Serialize)]
+struct Doctor {
+    data_root: String,
+    migration_ran: bool,
+    default_endpoint_name: String,
+    live_session_count: usize,
+    sessions: Vec<Session>,
+    loaded_group_count: usize,
+}
+#[derive(Serialize)]
+struct Session {
+    app_key: String,
+    volume: f32,
+    state: String,
+    controllable: bool,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Doctor { json, set_volume } => {
+            let app = NovaMixerApplication::start(|_| {})?;
+            let mut snapshot = app.snapshot().await?;
+            if let Some(args) = set_volume {
+                let scalar: f32 = args[1].parse()?;
+                for session in snapshot
+                    .sessions
+                    .iter()
+                    .filter(|session| session.app_key.eq_ignore_ascii_case(&args[0]))
+                {
+                    app.audio
+                        .set_session_volume(session.live_id.clone(), scalar)
+                        .await?;
+                }
+                snapshot = app.snapshot().await?;
+            }
+            let report = Doctor {
+                data_root: app.data_root().display().to_string(),
+                migration_ran: app.migration_ran(),
+                default_endpoint_name: snapshot.master.endpoint_name,
+                live_session_count: snapshot.sessions.len(),
+                sessions: snapshot
+                    .sessions
+                    .into_iter()
+                    .map(|value| Session {
+                        app_key: value.app_key,
+                        volume: value.volume,
+                        state: format!("{:?}", value.state).to_lowercase(),
+                        controllable: value.controllable,
+                    })
+                    .collect(),
+                loaded_group_count: app.settings().groups.len(),
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "Data root: {}\nMigration ran: {}\nDefault endpoint: {}\nLive sessions: {}",
+                    report.data_root,
+                    report.migration_ran,
+                    report.default_endpoint_name,
+                    report.live_session_count
+                );
+                for session in report.sessions {
+                    println!(
+                        "  {} volume={:.3} state={} controllable={}",
+                        session.app_key, session.volume, session.state, session.controllable
+                    );
+                }
+                println!("Loaded groups: {}", report.loaded_group_count);
+            }
+        }
+    }
+    Ok(())
+}

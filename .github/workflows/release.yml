@@ -1,0 +1,32 @@
+name: Release
+on:
+  push:
+    tags: ["v*.*.*"]
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with: { version: 9.0.0, run_install: false }
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version: "22", cache: pnpm }
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri build --bundles nsis,msi
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          New-Item target/release/portable -ItemType Directory -Force
+          Copy-Item target/release/novamixer.exe target/release/portable/
+          New-Item target/release/portable/portable.flag -ItemType File
+          Set-Content target/release/portable/README.txt 'NovaMixer stores portable settings under .\data.'
+          Compress-Archive target/release/portable/* "target/release/NovaMixer-${{ github.ref_name }}-portable.zip"
+      - uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
+        with:
+          files: |
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
+            target/release/*-portable.zip
