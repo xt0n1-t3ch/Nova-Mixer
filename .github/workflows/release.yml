@@ -30,10 +30,11 @@ jobs:
           $assets = @(Get-ChildItem target/release/bundle/nsis/*.exe) + @(Get-ChildItem target/release/bundle/msi/*.msi) + @(Get-ChildItem target/release/*-portable.zip)
           $lines = foreach ($asset in $assets) {
             $hash = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            Set-Content -NoNewline "$($asset.FullName).sha256" "$hash  $($asset.Name)`n"
-            "$hash  $($asset.Name)"
+            $line = "$hash  $($asset.Name)"
+            Set-Content -LiteralPath "$($asset.FullName).sha256" -Value "$line`n" -NoNewline
+            $line
           }
-          Set-Content -NoNewline target/release/SHA256SUMS.txt (($lines -join "`n") + "`n")
+          Set-Content -LiteralPath target/release/SHA256SUMS.txt -Value (($lines -join "`n") + "`n") -NoNewline
       - uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2
         with:
           draft: true
