@@ -69,7 +69,8 @@ opens. It is a faster, clearer replacement for the Windows volume mixer.
 2. Run it. The installer is per user and does not need administrator rights.
 3. Open NovaMixer from the Start menu. It appears in the tray and can start with Windows.
 
-An MSI package is also available for managed installs.
+An MSI package is also available for managed installs. The portable ZIP runs without an install and
+keeps its settings in a `data` folder beside `novamixer.exe`. Every asset has a SHA-256 checksum.
 
 **Requirements:** Windows 10 or 11 (64-bit) and the Microsoft Edge WebView2 runtime, which Windows 11
 already includes. The installer downloads WebView2 if it is missing.
