@@ -2402,6 +2402,7 @@ dependencies = [
  "app-icons",
  "audio-policy",
  "audio-sessions",
+ "futures-lite",
  "novamixer-contracts",
  "parking_lot",
  "settings-store",

@@ -5,7 +5,18 @@ use novamixer_contracts::{
 };
 use parking_lot::RwLock;
 use settings_store::{LoadReport, SettingsStore};
-use std::{io, path::Path, sync::Arc};
+use std::{
+    io,
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
+/// How long after the last level change the levels are written to disk.
+const PERSIST_DEBOUNCE: Duration = Duration::from_millis(400);
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -31,6 +42,8 @@ pub struct NovaMixerApplication {
     settings: Arc<RwLock<AppSettings>>,
     store: SettingsStore,
     load_report: LoadReport,
+    /// Bumped on every level change; only the newest scheduled save runs.
+    persist_generation: Arc<AtomicU64>,
 }
 impl NovaMixerApplication {
     pub fn start(callback: impl Fn(AudioEvent) + Send + Sync + 'static) -> Result<Self> {
@@ -49,6 +62,7 @@ impl NovaMixerApplication {
             settings: Arc::new(RwLock::new(report.settings.clone())),
             store,
             load_report: report,
+            persist_generation: Arc::new(AtomicU64::new(0)),
         })
     }
     pub fn settings(&self) -> AppSettings {
@@ -63,47 +77,103 @@ impl NovaMixerApplication {
     pub async fn snapshot(&self) -> Result<MixerSnapshot> {
         Ok(self.audio.list_applications().await?)
     }
+    /// Writes what the running sessions report about their executables back to
+    /// the saved applications (see `refresh_live_identities`), and saves when
+    /// anything changed. Returns the settings that were saved, if any.
+    ///
+    /// Run once after startup: the audio worker adopts the sessions that were
+    /// already playing, but nothing else saves until the user changes something,
+    /// so without this the stored record keeps naming an install folder that no
+    /// longer exists.
+    pub async fn sync_live_identities(&self) -> Result<Option<AppSettings>> {
+        let snapshot = self.snapshot().await?;
+        let mut settings = self.settings();
+        if !refresh_live_identities(&mut settings, &snapshot) {
+            return Ok(None);
+        }
+        self.persist_settings(&mut settings)?;
+        *self.settings.write() = settings.clone();
+        Ok(Some(settings))
+    }
     pub async fn save_settings(&self, mut settings: AppSettings) -> Result<()> {
-        settings.validate();
-        enrich_applications(&mut settings.applications, self.store.data_root());
-        self.store.save(&settings)?;
+        self.persist_settings(&mut settings)?;
         self.audio
             .update_settings(settings.applications.clone(), settings.groups.clone())
             .await?;
         *self.settings.write() = settings;
         Ok(())
     }
+    fn persist_settings(&self, settings: &mut AppSettings) -> Result<()> {
+        settings.validate();
+        enrich_applications(&mut settings.applications, self.store.data_root());
+        self.store.save(settings)?;
+        Ok(())
+    }
     async fn persist_snapshot(&self) -> Result<()> {
         let snapshot = self.snapshot().await?;
         let mut settings = self.settings();
         settings.applications = snapshot.applications;
-        self.save_settings(settings).await
+        // The snapshot already came from the live registry. Sending it back during every fader
+        // write creates a needless rebuild boundary and used to erase sessions absent from disk.
+        self.persist_settings(&mut settings)?;
+        *self.settings.write() = settings;
+        Ok(())
+    }
+    /// Saves the live levels shortly after the last change instead of on every change.
+    ///
+    /// A fader drag sends a level every frame. Writing the whole settings file and its
+    /// backup for each one put a disk write on the path of every volume change, so the
+    /// level lagged behind the fader whenever the disk was slow. The Windows call now
+    /// returns at once; one save follows the burst, from a background thread.
+    fn schedule_persist(&self) {
+        let generation = self.persist_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let app = self.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(PERSIST_DEBOUNCE);
+            if app.persist_generation.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            if let Err(error) = futures_lite::future::block_on(app.persist_snapshot()) {
+                tracing::warn!(%error, "saving levels failed");
+            }
+        });
     }
     pub async fn set_app_volume(&self, key: &str, volume: f32) -> Result<()> {
         self.audio.set_app_volume(key.into(), volume).await?;
-        self.persist_snapshot().await
+        self.schedule_persist();
+        Ok(())
     }
     pub async fn set_app_mute(&self, key: &str, muted: bool) -> Result<()> {
         self.audio.set_app_mute(key.into(), muted).await?;
-        self.persist_snapshot().await
+        self.schedule_persist();
+        Ok(())
     }
+    /// Sets every member of a group to one level, then saves shortly after.
+    ///
+    /// A hotkey held down fires this many times a second. It used to save the
+    /// whole settings file and its backup on every repeat, so presses queued
+    /// behind disk writes and concurrent writes failed with "Access is denied",
+    /// which made hotkeys look dead. The level now lands at once and the group
+    /// value is saved by the same debounced writer as the faders.
     pub async fn set_group_volume(&self, id: &str, volume: f32) -> Result<()> {
-        let group = self
-            .settings()
-            .groups
-            .into_iter()
-            .find(|g| g.id == id)
-            .ok_or(ApplicationError::GroupNotFound)?;
+        let volume = audio_policy::clamp_scalar(volume);
+        let group = {
+            let mut settings = self.settings.write();
+            let group = settings
+                .groups
+                .iter_mut()
+                .find(|g| g.id == id)
+                .ok_or(ApplicationError::GroupNotFound)?;
+            group.volume = volume;
+            group.clone()
+        };
         for key in &group.app_keys {
-            let _ = self
-                .audio
-                .set_app_volume(key.clone(), audio_policy::clamp_scalar(volume))
-                .await;
+            // A member that is not running has no session to set; its saved level
+            // is still applied when it starts.
+            let _ = self.audio.set_app_volume(key.clone(), volume).await;
         }
-        let mut s = self.settings();
-        s.groups.iter_mut().find(|g| g.id == id).unwrap().volume =
-            audio_policy::clamp_scalar(volume);
-        self.save_settings(s).await
+        self.schedule_persist();
+        Ok(())
     }
     pub async fn upsert_group(&self, group: Group) -> Result<Group> {
         let mut s = self.settings();
@@ -139,17 +209,24 @@ impl NovaMixerApplication {
     }
     pub async fn list_candidates(&self) -> Result<Vec<AppCandidate>> {
         let snapshot = self.snapshot().await?;
+        let settings = self.settings();
         Ok(snapshot
             .applications
             .into_iter()
-            .map(|a| AppCandidate {
-                app_key: a.app_key,
-                display_name: a.display_name,
-                executable_name: a.executable_name,
-                executable_path: a.executable_path,
-                icon: a.icon,
-                running: a.running,
-                already_managed: true,
+            .map(|a| {
+                let already_managed = settings
+                    .applications
+                    .iter()
+                    .any(|saved| saved.app_key.eq_ignore_ascii_case(&a.app_key));
+                AppCandidate {
+                    app_key: a.app_key,
+                    display_name: a.display_name,
+                    executable_name: a.executable_name,
+                    executable_path: a.executable_path,
+                    icon: a.icon,
+                    running: a.running,
+                    already_managed,
+                }
             })
             .collect())
     }
@@ -323,9 +400,33 @@ impl NovaMixerApplication {
     }
 }
 
+/// Updates each saved application from the live application with the same
+/// `app_key` in `snapshot`: executable path, executable name, and, when the
+/// path changed, the icon and discovered name read from that executable.
+/// User choices (custom name, level, pin, group) are untouched. Returns `true`
+/// when anything changed.
+///
+/// One key can cover several install folders (Squirrel.Windows
+/// `app-<version>`), so this is what moves a saved record from a removed
+/// version folder to the one that runs now.
+pub fn refresh_live_identities(settings: &mut AppSettings, snapshot: &MixerSnapshot) -> bool {
+    let mut changed = false;
+    for live in snapshot.applications.iter().filter(|app| app.running) {
+        if let Some(saved) = settings
+            .applications
+            .iter_mut()
+            .find(|saved| saved.app_key.eq_ignore_ascii_case(&live.app_key))
+        {
+            changed |= audio_sessions::refresh_from_live(saved, live);
+        }
+    }
+    changed
+}
+
 fn enrich_applications(applications: &mut [Application], _data_root: &Path) -> bool {
     // Persisting the data URL in settings keeps the cache tied to its application record and
-    // avoids a second index/cleanup contract for small (roughly 2–3 KB) derived PNGs.
+    // avoids a second index/cleanup contract for small (at most 128 px, roughly 10–30 KB)
+    // derived PNGs.
     let icons = app_icons::IconCache::default();
     let mut changed = false;
     for app in applications {

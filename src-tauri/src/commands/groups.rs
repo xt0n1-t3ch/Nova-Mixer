@@ -4,8 +4,9 @@ use crate::{
 };
 use novamixer_contracts::{Group, Scene};
 use tauri::{Emitter, State};
-fn app_error(e: novamixer_application::ApplicationError) -> AppError {
-    AppError::Other(e.to_string())
+
+fn app_error(error: novamixer_application::ApplicationError) -> AppError {
+    error.into()
 }
 #[tauri::command]
 pub async fn set_group_volume(

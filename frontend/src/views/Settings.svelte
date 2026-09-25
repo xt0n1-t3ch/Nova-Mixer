@@ -1,11 +1,10 @@
 <script lang="ts">
   /**
-   * Settings as a two-column workshop.
+   * Settings: a section index beside the section's controls.
    *
-   * A tab strip over one narrow card left most of a wide window empty and gave
-   * no sense of what a setting actually did. This uses a section index on the
-   * left, the controls in the middle, and a live status rail on the right, so
-   * the space carries the consequence of each toggle rather than stretching it.
+   * It shares the grid of Groups and About — a fixed side column and a fluid
+   * main column under the common page header — so the secondary views read as
+   * one application. Live status lives on About, not duplicated here.
    */
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
@@ -19,7 +18,7 @@
   import EfficiencyToggle from "../components/EfficiencyToggle.svelte";
   import HotkeyCapture from "../components/HotkeyCapture.svelte";
   import Select from "../components/Select.svelte";
-  import StatusRail from "../components/StatusRail.svelte";
+  import PageHeader from "../components/PageHeader.svelte";
   import {
     activeGroup,
     applyHotkeys,
@@ -114,9 +113,10 @@
   );
 </script>
 
+<PageHeader title={$t("view.settings.title")} />
+
 <div class="settings">
   <nav class="index" aria-label={$t("view.settings.title")}>
-    <h1 class="index-title">{$t("view.settings.title")}</h1>
     {#each SECTIONS as item (item.id)}
       {@const Icon = item.icon}
       <button
@@ -296,7 +296,7 @@
               <div class="shortcut">
                 <dt>{$t(shortcut.descriptionKey)}</dt>
                 <dd>
-                  {#each shortcut.keys as key (key)}
+                  {#each shortcut.keys as key, index (index)}
                     <span class="kbd">{key === "esc" ? "Esc" : key === "mod" ? "Ctrl" : key.toUpperCase()}</span>
                   {/each}
                 </dd>
@@ -410,8 +410,6 @@
         </section>
       {/if}
     </div>
-
-    <StatusRail />
   {/if}
 </div>
 
@@ -435,32 +433,23 @@
 {/if}
 
 <style>
-  /* The columns stretch to the frame instead of ending two thirds down, which
-     is what made the previous version read as an empty page with a card on it.
-     The index and status rail are full-height surfaces; the controls scroll
-     inside their own column. */
   .settings {
     display: grid;
-    grid-template-columns: 196px minmax(0, 1fr) 272px;
+    grid-template-columns: var(--side-panel-width) minmax(0, 1fr);
     gap: var(--space-4);
-    align-items: stretch;
-    flex: 1;
-    min-height: 0;
+    align-items: start;
   }
 
+  /* The index is a panel like the Groups bank beside it on the next view, so
+     both side columns open at the same place and read the same way. */
   .index {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding-right: var(--space-4);
-    border-right: 1px solid var(--border);
-  }
-  .index-title {
-    font-size: var(--fs-2xl);
-    font-weight: 700;
-    letter-spacing: var(--letter-tighter);
-    color: var(--text-primary);
-    margin-bottom: var(--space-4);
+    padding: var(--space-2);
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
   }
   .index-item {
     display: flex;
@@ -481,25 +470,29 @@
     color: var(--text-primary);
   }
   .index-item.active {
-    background: var(--accent-dim);
-    color: var(--accent);
+    background: var(--bg-elevated-2);
+    color: var(--text-primary);
     font-weight: 600;
   }
   .index-item:focus-visible {
     outline: none;
     box-shadow: var(--shadow-ring);
   }
+  /* Blocks hug their content.
 
-  /* The last block absorbs the leftover height, so the column reaches the frame
-     instead of stopping wherever its content happens to end. */
+     The previous rule stretched the last block with `flex: 1` so the column
+     "reached the frame" instead of ending wherever its content ended. That
+     traded one cosmetic problem for a worse one: on the Startup screen the
+     PERFORMANCE card grew to roughly three times its content, leaving ~450px of
+     bordered emptiness that reads as a rendering fault or as missing settings.
+     A card is a container for its content; empty space below the last card is
+     just page, and page is not a defect. */
   .panel {
     display: flex;
     flex-direction: column;
+    align-content: start;
     gap: var(--space-4);
     min-width: 0;
-  }
-  .panel > .block:last-child {
-    flex: 1;
   }
 
   .block {
@@ -512,8 +505,8 @@
     margin-bottom: var(--space-2);
   }
   .block-title {
-    font-size: var(--fs-xs);
-    font-weight: 600;
+    font-size: var(--fs-2xs);
+    font-weight: 650;
     text-transform: uppercase;
     letter-spacing: var(--letter-wider);
     color: var(--text-muted);
@@ -608,7 +601,7 @@
   .preview-row {
     height: 8px;
     border-radius: 2px;
-    background: var(--preview-ink, var(--text-placeholder));
+    background: var(--preview-ink, var(--text-faint));
     opacity: 0.35;
   }
   .preview-row.is-short {
@@ -663,33 +656,14 @@
     flex-shrink: 0;
   }
 
-  /* At the minimum window the index becomes a horizontal strip: a quarter of an
-     860px window is too much to spend on four labels, and the settings copy
-     needs that width to stop wrapping. */
-  @media (max-width: 1100px) {
-    .settings {
-      grid-template-columns: minmax(0, 1fr) 252px;
-      grid-template-rows: auto 1fr;
-    }
-    .index {
-      grid-column: 1 / -1;
-      flex-direction: row;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: var(--space-1);
-      padding: 0 0 var(--space-3);
-      border-right: none;
-      border-bottom: 1px solid var(--border);
-    }
-    .index-title {
-      margin: 0 var(--space-4) 0 0;
-      font-size: var(--fs-xl);
-    }
-  }
-
-  @media (max-width: 860px) {
+  /* At the window's floor the index becomes a strip above the controls: a
+     fixed column would take the width the setting copy needs. */
+  @media (max-width: 960px) {
     .settings {
       grid-template-columns: minmax(0, 1fr);
     }
-  }
-</style>
+    .index {
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+  }</style>

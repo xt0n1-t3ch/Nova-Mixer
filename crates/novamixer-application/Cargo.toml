@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 audio-policy = { path = "../audio-policy" }
 audio-sessions = { path = "../audio-sessions" }
+futures-lite = "2"
 app-icons = { path = "../app-icons" }
 novamixer-contracts = { path = "../novamixer-contracts" }
 settings-store = { path = "../settings-store" }

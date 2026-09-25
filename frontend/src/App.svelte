@@ -3,8 +3,7 @@
   import { fly } from "svelte/transition";
   import type { Theme } from "./lib/api";
   import { setMeteringActive } from "./lib/api";
-  import CommandRail from "./components/CommandRail.svelte";
-  import ChromeBar from "./components/ChromeBar.svelte";
+  import TopBar from "./components/TopBar.svelte";
   import Toast from "./components/Toast.svelte";
   import ShortcutOverlay from "./components/ShortcutOverlay.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
@@ -59,38 +58,9 @@
   }
 
   let density = $derived($settings?.ui_prefs.density ?? "comfy");
-  let forcedRailCollapse = $state(false);
-  let railExpanded = $derived(
-    !($settings?.ui_prefs.sidebar_collapsed ?? false) && !forcedRailCollapse,
-  );
 
   $effect(() => {
     document.documentElement.setAttribute("data-density", density);
-  });
-
-  function toggleRail(): void {
-    const current = $settings;
-    if (!current || forcedRailCollapse) return;
-    persistSettings({
-      ...current,
-      ui_prefs: {
-        ...current.ui_prefs,
-        sidebar_collapsed: !current.ui_prefs.sidebar_collapsed,
-      },
-    });
-  }
-
-  // At the enforced minimum width labels would consume the fader's working
-  // room. The responsive collapse is presentation-only: it never overwrites the
-  // user's saved preference, which returns when the window grows again.
-  onMount(() => {
-    const media = window.matchMedia("(max-width: 900px)");
-    const sync = (): void => {
-      forcedRailCollapse = media.matches;
-    };
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
   });
 
   onMount(() => {
@@ -219,20 +189,8 @@
   });
 </script>
 
-<div class="app-shell" class:rail-expanded={railExpanded}>
-  <div class="app-ambient" aria-hidden="true">
-    <div class="ambient-mesh"></div>
-    <div class="ambient-grain"></div>
-  </div>
-
-  <CommandRail
-    onToggleTheme={toggleTheme}
-    {theme}
-    expanded={railExpanded}
-    forcedCollapsed={forcedRailCollapse}
-    onToggleExpanded={toggleRail}
-  />
-  <ChromeBar />
+<div class="app-shell">
+  <TopBar {theme} onToggleTheme={toggleTheme} />
 
   <main class="app-main">
     <div class="main-inner" class:is-desk={$currentView === "applications"}>
@@ -281,70 +239,23 @@
     inset: 0;
     z-index: 1;
     display: grid;
-    grid-template-rows: var(--chrome-height) 1fr;
-    grid-template-columns: var(--rail-width) minmax(0, 1fr);
+    grid-template-rows: var(--chrome-height) minmax(0, 1fr);
     overflow: hidden;
-    background: transparent;
-    transition: grid-template-columns var(--dur-normal) var(--ease-emphasized);
+    background: var(--bg-app);
   }
-  .app-shell.rail-expanded {
-    grid-template-columns: var(--rail-width-expanded) minmax(0, 1fr);
-  }
-  .app-shell :global(.rail) {
-    grid-row: 1 / -1;
-    grid-column: 1;
-    z-index: 70;
-  }
-  .app-shell :global(.chrome) {
-    grid-row: 1;
-    grid-column: 2;
+  .app-shell :global(.topbar) {
     position: relative;
     z-index: 70;
   }
-
-  /* A slow, very low-contrast mesh keeps a full-black window from reading as
-     dead, without competing with the content. */
-  .app-ambient {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    overflow: hidden;
-    pointer-events: none;
-    background: var(--bg-base);
-  }
-  .ambient-mesh {
-    position: absolute;
-    inset: -20%;
-    background:
-      radial-gradient(ellipse 72% 62% at 5% 0%, var(--ambient-glow-1), transparent 60%),
-      radial-gradient(ellipse 60% 55% at 98% 6%, var(--ambient-glow-2), transparent 62%),
-      radial-gradient(ellipse 82% 78% at 0% 100%, var(--ambient-glow-3), transparent 60%);
-    animation: ambient-drift 64s ease-in-out infinite alternate;
-  }
-  @keyframes ambient-drift {
-    from {
-      transform: translate3d(0, 0, 0) scale(1);
-    }
-    to {
-      transform: translate3d(2.5%, -2%, 0) scale(1.1);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .ambient-mesh {
-      animation: none;
-    }
-  }
-  .ambient-grain {
-    position: absolute;
-    inset: 0;
-    background-image: var(--noise-url);
-    opacity: 0.4;
-    mix-blend-mode: overlay;
-  }
+  /* There is deliberately no ambient layer here. An earlier version painted
+     three drifting indigo radials plus an overlay-blended noise texture across
+     the whole window to keep a dark chassis from "reading as dead". It did the
+     opposite: it tinted every neutral surface purple, put a 64-second animation
+     behind a real-time meter, and left signal colour nothing to contrast
+     against. A mixing console is a flat, unlit slab; the depth comes from the
+     surface ladder and the meters, not from the backdrop. */
 
   .app-main {
-    grid-row: 2;
-    grid-column: 2;
     position: relative;
     z-index: 1;
     min-width: 0;
@@ -353,10 +264,10 @@
     flex-direction: column;
   }
 
-  /* Secondary screens are documents and keep a padded, centred column. The
-     mixer desk is not: it fills the frame edge to edge and manages its own
-     scrolling, so the master deck can span the console.
-     
+  /* One frame for every view: the same gutter, the same header, the same
+     content width. The mixer only differs in that it spans the full width and
+     scrolls its own bay, so its header stays put while the strips move.
+
      The height chain matters: each wrapper passes its height down, otherwise a
      view asking for `min-height: 100%` measures against an auto-sized parent
      and collapses to its content, leaving a dead band under the last card. */
@@ -366,7 +277,7 @@
     max-width: var(--content-max);
     width: 100%;
     margin: 0 auto;
-    padding: clamp(18px, 2.4vw, 32px) clamp(18px, 3vw, 40px) clamp(24px, 3vw, 40px);
+    padding: var(--page-gutter-y) var(--page-gutter-x);
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
@@ -383,14 +294,16 @@
     display: flex;
     flex-direction: column;
   }
-  .view-pane > :global(*),
-  .view-fade > :global(*) {
+  /* Only the content after the shared header grows; the header keeps its own
+     height, or the two split the pane and push the content down. */
+  .view-pane > :global(:not(.view-header)),
+  .view-fade > :global(:not(.view-header)) {
     flex: 1;
     min-height: 0;
   }
   .main-inner.is-desk {
     max-width: none;
-    padding: 0;
+    padding-bottom: var(--space-4);
     overflow: hidden;
   }
 
@@ -413,9 +326,4 @@
     }
   }
 
-  @media (max-width: 720px) {
-    .main-inner {
-      padding: 16px 16px 24px;
-    }
-  }
 </style>

@@ -21,6 +21,9 @@ enum Command {
         set_volume: Option<Vec<String>>,
         #[arg(long)]
         watch: bool,
+        /// With --watch, print the live Windows peak meters once a second.
+        #[arg(long, requires = "watch")]
+        peaks: bool,
     },
 }
 #[derive(Serialize)]
@@ -64,15 +67,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         json: false,
         set_volume: None,
         watch: false,
+        peaks: false,
     }) {
         Command::Doctor {
             json,
             set_volume,
             watch,
+            peaks,
         } => {
+            let last_peaks = std::sync::Mutex::new(std::time::Instant::now());
             let app = NovaMixerApplication::start(move |event| {
                 if watch {
                     match event {
+                        // The same `IAudioMeterInformation::GetPeakValue` batch
+                        // the interface meters draw, throttled to one line a
+                        // second so it stays readable.
+                        audio_sessions::AudioEvent::Peaks(batch) if peaks => {
+                            let mut last = last_peaks.lock().unwrap_or_else(|e| e.into_inner());
+                            if last.elapsed() >= Duration::from_secs(1) {
+                                *last = std::time::Instant::now();
+                                let apps = batch
+                                    .applications
+                                    .iter()
+                                    .map(|a| format!("{}={:.3}", a.app_key, a.peak))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                eprintln!("peaks master={:.3} {apps}", batch.master_peak);
+                            }
+                        }
                         audio_sessions::AudioEvent::ApplicationAdded(a) => eprintln!(
                             "application-added {} sessions={}",
                             a.app_key,

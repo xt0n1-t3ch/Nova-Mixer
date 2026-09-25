@@ -1,15 +1,19 @@
 <script lang="ts">
   /**
-   * The master deck: the output section of the console.
+   * The output: the one control that sums every channel below it.
    *
-   * It spans the desk rather than sitting in a rounded card, because it is not
-   * one more item in the list — it is the thing every channel below it feeds
-   * into. Its fader shares the same left edge as the channel faders, so the
-   * whole desk reads on one set of column guides.
+   * It is the channel row's big sibling, on the same grammar — identity, a
+   * fader with its meter fused beneath it, the readout, mute — so it reads as
+   * the same instrument, only louder. The presets are a stepped control for the
+   * value the fader already sets.
+   *
+   * The meter is the endpoint's own `IAudioMeterInformation::GetPeakValue`,
+   * one value for the device. It is drawn once; two ladders would pretend to
+   * show left and right channels that the backend does not measure.
    */
   import Volume2 from "@lucide/svelte/icons/volume-2";
   import VolumeX from "@lucide/svelte/icons/volume-x";
-  import Speaker from "@lucide/svelte/icons/speaker";
+  import Headphones from "@lucide/svelte/icons/headphones";
   import type { MasterState } from "../lib/api";
   import { formatPercent, volumeValueText } from "../lib/volume";
   import { VOLUME_PRESETS } from "../lib/ux";
@@ -20,14 +24,12 @@
   let {
     master,
     peak = 0,
-    runningCount = 0,
     onInput,
     onCommit,
     onToggleMute,
   }: {
     master: MasterState;
     peak?: number;
-    runningCount?: number;
     onInput: (value: number) => void;
     onCommit: (value: number) => void;
     onToggleMute: () => void;
@@ -36,247 +38,211 @@
   let muteLabel = $derived(master.muted ? $t("master.unmute") : $t("master.mute"));
 </script>
 
-<section class="deck" class:is-muted={master.muted} aria-label={$t("master.label")}>
-  <div class="deck-identity">
-    <span class="deck-label">{$t("master.label")}</span>
-    <span class="deck-endpoint truncate" title={master.endpoint_name}>
-      <Speaker size={12} aria-hidden="true" />
-      {master.endpoint_name}
-    </span>
-    <span class="deck-status">
-      {$t("master.feeding", { count: runningCount })}
+<section class="master surface" class:is-muted={master.muted} aria-label={$t("master.label")}>
+  <div class="master-id">
+    <span class="master-badge" aria-hidden="true"><Headphones size={18} /></span>
+    <span class="master-text">
+      <span class="master-title">{$t("master.label")}</span>
+      <span class="master-endpoint truncate" title={master.endpoint_name}>
+        {master.endpoint_name}
+      </span>
     </span>
   </div>
 
-  <div class="deck-controls">
-    <button
-      class="deck-mute"
-      class:is-danger={master.muted}
-      onclick={onToggleMute}
-      aria-label={muteLabel}
-      aria-pressed={master.muted}
-      title={muteLabel}
-    >
-      {#if master.muted}
-        <VolumeX size={19} />
-      {:else}
-        <Volume2 size={19} />
-      {/if}
-    </button>
-
-    <div class="deck-fader">
-      <Range
-        value={master.volume}
-        muted={master.muted}
-        size="lg"
-        ariaLabel={$t("master.volume")}
-        ariaValueText={volumeValueText(master.volume, master.muted, $t("app.muted"))}
-        {onInput}
-        {onCommit}
-      />
-      <div class="deck-presets">
-        {#each VOLUME_PRESETS as preset (preset)}
-          <button
-            class="preset"
-            class:active={Math.round(master.volume * 100) === Math.round(preset * 100)}
-            onclick={() => {
-              onInput(preset);
-              onCommit(preset);
-            }}
-          >
-            {formatPercent(preset)}
-          </button>
-        {/each}
-      </div>
+  <div class="master-level">
+    <Range
+      value={master.volume}
+      muted={master.muted}
+      size="lg"
+      resetTo={1}
+      ariaLabel={$t("master.volume")}
+      ariaValueText={volumeValueText(master.volume, master.muted, $t("app.muted"))}
+      {onInput}
+      {onCommit}
+    />
+    <div class="master-meter">
+      <Meter peak={master.muted ? 0 : peak} bars={48} />
     </div>
+  </div>
 
-    <output class="deck-value display-num" for="">{formatPercent(master.volume)}</output>
+  <output class="master-value mono" for="">{formatPercent(master.volume)}</output>
 
-    <div class="deck-meter">
-      <Meter peak={master.muted ? 0 : peak} bars={9} orientation="vertical" />
-    </div>
+  <button
+    class="master-mute"
+    class:is-danger={master.muted}
+    onclick={onToggleMute}
+    aria-label={muteLabel}
+    aria-pressed={master.muted}
+    title={muteLabel}
+  >
+    {#if master.muted}<VolumeX size={17} />{:else}<Volume2 size={17} />{/if}
+  </button>
+
+  <div class="presets" role="group" aria-label={$t("master.presets")}>
+    {#each VOLUME_PRESETS as preset (preset)}
+      {@const active = Math.round(master.volume * 100) === Math.round(preset * 100)}
+      <button
+        class="preset mono"
+        class:active
+        aria-pressed={active}
+        onclick={() => {
+          onInput(preset);
+          onCommit(preset);
+        }}
+      >
+        {Math.round(preset * 100)}
+      </button>
+    {/each}
   </div>
 </section>
 
 <style>
-  /* Ruled edges rather than a card outline: the deck is part of the console
-     surface, and the rule below it is the console's own division. */
-  .deck {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: var(--space-3);
-    padding: var(--space-4) var(--space-5);
-    background: var(--deck-bg);
-    border-bottom: 1px solid var(--deck-line-strong);
-    position: relative;
-  }
-  /* A leading accent edge marks the master as the driving section; it turns red
-     when the whole output is silenced, which is worth noticing from anywhere. */
-  .deck::before {
-    content: "";
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 3px;
-    background: linear-gradient(
-      to bottom,
-      var(--deck-edge, var(--accent)),
-      color-mix(in oklab, var(--deck-edge, var(--accent)) 20%, transparent)
-    );
-  }
-  .deck.is-muted {
-    --deck-edge: var(--danger);
-  }
-
-  .deck-identity {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-3);
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  .deck-label {
-    font-size: var(--fs-2xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-muted);
-  }
-  .deck-endpoint {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--fs-sm);
-    color: var(--text-secondary);
-    min-width: 0;
-    max-width: 420px;
-  }
-  .deck-status {
-    font-size: var(--fs-xs);
-    color: var(--text-placeholder);
-    margin-left: auto;
-  }
-
-  .deck-controls {
+  /* The output row uses the channel grid's rhythm with a wider identity and a
+     presets column, so its fader visibly heads the column of faders below. */
+  .master {
     display: grid;
-    grid-template-columns: 44px minmax(0, 1fr) auto 24px;
+    grid-template-columns: minmax(200px, 0.9fr) minmax(200px, 2.4fr) 56px 40px auto;
     align-items: center;
     gap: var(--space-4);
+    padding: var(--space-3) var(--space-4) var(--space-3) var(--space-5);
+  }
+  /* Muted output is the state a user is most likely to miss, so it marks the
+     whole panel, not only the button. */
+  .master.is-muted {
+    border-color: var(--danger);
   }
 
-  .deck-mute {
+  .master-id {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+  .master-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-lg);
-    color: var(--text-secondary);
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md);
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+  .master.is-muted .master-badge {
+    background: var(--danger);
+    color: var(--danger-on);
+  }
+  .master-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .master-title {
+    font-size: var(--fs-md);
+    font-weight: 650;
+    color: var(--text-primary);
+    line-height: var(--lh-tight);
+  }
+  .master-endpoint {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+  }
+
+  .master-level {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .master-meter {
+    height: 7px;
+    padding: 0 2px;
+  }
+  .master-meter :global(.meter) {
+    height: 100%;
+  }
+
+  .master-value {
+    font-size: var(--fs-lg);
+    font-weight: 650;
+    color: var(--text-primary);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .master.is-muted .master-value {
+    color: var(--text-faint);
+  }
+
+  .master-mute {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 36px;
+    border-radius: var(--radius-sm);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
+    color: var(--text-secondary);
     transition:
       color var(--dur-fast) var(--ease),
-      background var(--dur-fast) var(--ease),
-      border-color var(--dur-fast) var(--ease);
+      background var(--dur-fast) var(--ease);
   }
-  .deck-mute:hover {
+  .master-mute:hover {
+    background: var(--bg-elevated-2);
     color: var(--text-primary);
-    border-color: var(--border-hover);
   }
-  .deck-mute:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-ring);
-  }
-  .deck-mute.is-danger {
-    color: var(--danger);
-    background: var(--danger-dim);
+  /* `--danger-on`, not `--accent-fg`: the glyph sits on a solid red fill and
+     the readable ink there differs per theme. */
+  .master-mute.is-danger {
+    color: var(--danger-on);
+    background: var(--danger);
     border-color: transparent;
   }
 
-  .deck-fader {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    min-width: 0;
-  }
-
-  .deck-presets {
-    display: flex;
-    gap: var(--space-1);
+  .presets {
+    display: inline-flex;
+    padding: 2px;
+    gap: 1px;
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
   }
   .preset {
-    height: 24px;
-    padding: 0 10px;
-    border-radius: var(--radius-full);
+    height: 26px;
+    padding: 0 8px;
+    border-radius: var(--radius-xs);
     font-size: var(--fs-2xs);
     font-weight: 600;
-    font-variant-numeric: tabular-nums;
     color: var(--text-muted);
-    background: transparent;
-    border: 1px solid var(--border);
     transition:
       color var(--dur-fast) var(--ease),
-      background var(--dur-fast) var(--ease),
-      border-color var(--dur-fast) var(--ease);
+      background var(--dur-fast) var(--ease);
   }
   .preset:hover {
     color: var(--text-primary);
-    background: var(--bg-elevated);
   }
   .preset.active {
-    color: var(--accent);
-    background: var(--accent-dim);
-    border-color: transparent;
-  }
-  .preset:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-ring);
+    color: var(--accent-fg);
+    background: var(--accent);
   }
 
-  .deck-value {
-    font-size: clamp(30px, 3.4vw, 46px);
-    line-height: 1;
-    align-self: center;
-    font-variant-numeric: tabular-nums;
-  }
-  .is-muted .deck-value {
-    color: var(--text-muted);
-  }
-
-  .deck-meter {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 56px;
-  }
-
-  /* At the window's minimum height the deck must give its space back to the
-     channels rather than keeping desktop padding around a single fader. */
-  @media (max-width: 900px), (max-height: 700px) {
-    .deck {
-      padding: var(--space-3) var(--space-4);
-      gap: var(--space-2);
+  /* The presets go first on a narrow window: they are a shortcut for a value
+     the fader already sets. */
+  @media (max-width: 1100px) {
+    .master {
+      grid-template-columns: minmax(150px, 0.8fr) minmax(160px, 2.4fr) 52px 40px;
     }
-    .deck-presets {
+    .presets {
       display: none;
     }
-    .deck-status {
-      display: none;
-    }
-    .deck-value {
-      font-size: clamp(26px, 3vw, 34px);
-    }
-    .deck-meter {
-      height: 40px;
-    }
   }
 
-  @media (max-width: 760px) {
-    .deck-controls {
-      grid-template-columns: 40px minmax(0, 1fr) auto;
-    }
-    .deck-meter {
-      display: none;
+  @media (prefers-reduced-motion: reduce) {
+    .preset,
+    .master-mute {
+      transition: none;
     }
   }
 </style>

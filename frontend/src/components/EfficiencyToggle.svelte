@@ -24,7 +24,8 @@
   onMount(async () => {
     status = { supported: true, enabled, detail: null };
     try {
-      status = await getEfficiencyStatus();
+      // An empty reply keeps the persisted value instead of blanking the toggle.
+      status = (await getEfficiencyStatus()) ?? status;
     } catch {
       // Leave the persisted value; toggling will surface any real problem.
     }
@@ -33,7 +34,7 @@
   async function toggle(next: boolean): Promise<void> {
     busy = true;
     try {
-      status = await setEfficiencyMode(next);
+      status = (await setEfficiencyMode(next)) ?? status;
       onChange(status.enabled);
     } catch (error) {
       status = {
@@ -90,7 +91,7 @@
      control reads as the same idea as the Task Manager column. */
   .leaf {
     display: inline-flex;
-    color: var(--text-placeholder);
+    color: var(--text-faint);
     transition: color var(--dur-normal) var(--ease);
   }
   .leaf.is-on {

@@ -1,26 +1,29 @@
 <script lang="ts">
   /**
-   * App icon with a deterministic lettered fallback.
+   * App icon with a lettered fallback.
    *
    * Icon extraction fails for packaged apps, protected processes and anything
    * whose executable path is unreadable, which is common enough that the
-   * fallback is a first-class state rather than an error. The tint is derived
-   * from the app key so the same application keeps the same colour forever.
+   * fallback is a first-class state rather than an error.
+   *
+   * The fallback tile is neutral on purpose. It used to be tinted from a hash
+   * of the app key, which put a saturated violet or green square in the same
+   * row as a level meter — and in this interface a colour in a channel means
+   * signal. Identity comes from the letter, so a missing icon can never be
+   * mistaken for a state.
    */
   import Volume2 from "@lucide/svelte/icons/volume-2";
-  import { initialFor, tintForKey } from "../lib/ux";
+  import { initialFor } from "../lib/ux";
 
   let {
     src,
     name,
-    appKey,
     size = 36,
     isSystem = false,
     dimmed = false,
   }: {
     src: string | null;
     name: string;
-    appKey: string;
     size?: number;
     isSystem?: boolean;
     /** Desaturates the icon for an application that is not currently running. */
@@ -56,7 +59,6 @@
     class="app-icon app-icon-fallback aura-badge"
     class:is-dimmed={dimmed}
     style:--icon-size="{size}px"
-    data-tint={isSystem ? undefined : tintForKey(appKey)}
     aria-hidden="true"
   >
     {#if isSystem}
@@ -68,12 +70,15 @@
 {/if}
 
 <style>
+  /* The artwork is the application's own 128px shell icon, drawn whole. No
+     radius, frame or background: the icon already carries its designed shape
+     and padding, and clipping its corners is what made logos look cropped. */
   .app-icon {
     width: var(--icon-size);
     height: var(--icon-size);
     flex-shrink: 0;
-    border-radius: var(--radius-md);
     object-fit: contain;
+    image-rendering: auto;
   }
 
   .app-icon-fallback {
@@ -88,6 +93,12 @@
   .app-icon.is-dimmed {
     filter: grayscale(0.85);
     opacity: 0.75;
+  }
+  img.app-icon {
+    filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
+  }
+  img.app-icon.is-dimmed {
+    filter: grayscale(0.85) drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
   }
 
   .app-icon-initial {

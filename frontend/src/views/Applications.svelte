@@ -2,10 +2,16 @@
   /**
    * The mixer desk.
    *
-   * Composition, top to bottom: master deck, scene belt, channel legend, then a
-   * scrolling column of channels. The master and the belt are fixed equipment;
-   * only the channels scroll, so the thing every channel feeds into never
-   * leaves the frame.
+   * The mixer desk.
+   *
+   * One toolbar row (title, scenes, view tools), the output row, then every
+   * application as a channel row, banked by state: Pinned, Active, Saved.
+   *
+   * Rows, not vertical strips. Strips spent the whole window height on each
+   * source and scrolled sideways past about seven; rows cost ~56px each, so a
+   * normal window shows every source, and each fader is long enough to set
+   * precisely. Every row shares `--grid-channel`, so all faders, readouts and
+   * mute buttons stand in the same columns.
    *
    * One row is one *application*, not one Windows audio session. Windows hands
    * an application several sessions whenever it likes, which is why an earlier
@@ -14,7 +20,6 @@
   import { flip } from "svelte/animate";
   import { fly } from "svelte/transition";
   import Plus from "@lucide/svelte/icons/plus";
-  import SearchX from "@lucide/svelte/icons/search-x";
   import AudioLines from "@lucide/svelte/icons/audio-lines";
   import VolumeOff from "@lucide/svelte/icons/volume-off";
   import Rows3 from "@lucide/svelte/icons/rows-3";
@@ -30,12 +35,12 @@
   import Dialog from "../components/Dialog.svelte";
   import EmptyState from "../components/EmptyState.svelte";
   import MasterDeck from "../components/MasterDeck.svelte";
+  import PageHeader from "../components/PageHeader.svelte";
   import SceneBar from "../components/SceneBar.svelte";
   import {
     addApplicationFromPath,
     appPeaks,
     applicationSections,
-    applications,
     audioAvailable,
     commitAppVolume,
     commitMasterVolume,
@@ -55,7 +60,6 @@
     previewSessionVolume,
     pushToast,
     refreshMixer,
-    searchQuery,
     sessionPeaks,
     settings,
     sortedApplications,
@@ -69,7 +73,6 @@
 
   let prefs = $derived($settings?.ui_prefs);
   let compact = $derived(prefs?.density === "compact");
-  let runningCount = $derived($applications.filter((app) => app.running).length);
 
   let addOpen = $state(false);
   let candidates = $state<AppCandidate[]>([]);
@@ -150,114 +153,99 @@
         </EmptyState>
       </div>
     {:else}
+      <!-- One toolbar row: the view, the scenes that act on it, and the tools
+           that filter it. Scenes sit in the header because they act on the
+           whole desk, not on any one strip. -->
+      <PageHeader title={$t("view.applications.title")}>
+        {#snippet actions()}
+          <div class="head-scenes"><SceneBar /></div>
+          <div class="head-tools">
+            <div class="tools-filters" role="group" aria-label={$t("desk.channels")}>
+              <button
+                class="icon-btn icon-btn-sm"
+                class:is-on={prefs?.show_offline}
+                aria-pressed={prefs?.show_offline ?? false}
+                onclick={() => setPref("show_offline", !(prefs?.show_offline ?? true))}
+                title={$t("view.applications.showOffline")}
+                aria-label={$t("view.applications.showOffline")}
+              ><PowerOff size={13} /></button>
+              <button
+                class="icon-btn icon-btn-sm"
+                class:is-on={prefs?.show_hidden}
+                aria-pressed={prefs?.show_hidden ?? false}
+                onclick={() => setPref("show_hidden", !(prefs?.show_hidden ?? false))}
+                title={$t("view.applications.showHidden")}
+                aria-label={$t("view.applications.showHidden")}
+              ><EyeOff size={13} /></button>
+              <button
+                class="icon-btn icon-btn-sm"
+                class:is-on={prefs?.show_system_sounds}
+                aria-pressed={prefs?.show_system_sounds ?? false}
+                onclick={() => setPref("show_system_sounds", !(prefs?.show_system_sounds ?? true))}
+                title={$t("view.applications.showSystemSounds")}
+                aria-label={$t("view.applications.showSystemSounds")}
+              ><Bell size={13} /></button>
+              <button
+                class="icon-btn icon-btn-sm"
+                onclick={() => setPref("density", compact ? "comfy" : "compact")}
+                title={compact ? $t("settings.densityComfy") : $t("settings.densityCompact")}
+                aria-label={compact ? $t("settings.densityComfy") : $t("settings.densityCompact")}
+              >{#if compact}<Rows2 size={13} />{:else}<Rows3 size={13} />{/if}</button>
+            </div>
+            <button
+              class="btn btn-sm btn-primary"
+              onclick={() => void openAdd()}
+              title={$t("view.applications.add")}
+              aria-label={$t("view.applications.add")}
+            >
+              <Plus size={13} />
+              <span class="add-label">{$t("view.applications.add")}</span>
+            </button>
+          </div>
+        {/snippet}
+      </PageHeader>
+
+      <!-- The output leads, because it is the level every channel below feeds
+           into; the channels follow as one list of rows on a shared grid. -->
       {#if $master}
         <MasterDeck
           master={$master}
           peak={$masterPeak}
-          {runningCount}
           onInput={previewMasterVolume}
           onCommit={(value) => void commitMasterVolume(value)}
           onToggleMute={() => void toggleMasterMute()}
         />
       {/if}
 
-      <SceneBar />
-
-      <!-- View controls own a real band. They are not forced into the legend's
-           last three grid columns, which only offered 164px for ~240px of tools
-           and caused the clipping in the real build. -->
-      <div class="channel-tools" aria-label={$t("desk.channels")}>
-        <span class="tools-label">{$t("desk.channels")}</span>
-        <div class="tools-filters">
-          <button
-            class="icon-btn icon-btn-sm"
-            class:is-on={prefs?.show_offline}
-            aria-pressed={prefs?.show_offline ?? false}
-            onclick={() => setPref("show_offline", !(prefs?.show_offline ?? true))}
-            title={$t("view.applications.showOffline")}
-            aria-label={$t("view.applications.showOffline")}
-          ><PowerOff size={13} /></button>
-          <button
-            class="icon-btn icon-btn-sm"
-            class:is-on={prefs?.show_hidden}
-            aria-pressed={prefs?.show_hidden ?? false}
-            onclick={() => setPref("show_hidden", !(prefs?.show_hidden ?? false))}
-            title={$t("view.applications.showHidden")}
-            aria-label={$t("view.applications.showHidden")}
-          ><EyeOff size={13} /></button>
-          <button
-            class="icon-btn icon-btn-sm"
-            class:is-on={prefs?.show_system_sounds}
-            aria-pressed={prefs?.show_system_sounds ?? false}
-            onclick={() => setPref("show_system_sounds", !(prefs?.show_system_sounds ?? true))}
-            title={$t("view.applications.showSystemSounds")}
-            aria-label={$t("view.applications.showSystemSounds")}
-          ><Bell size={13} /></button>
-          <button
-            class="icon-btn icon-btn-sm"
-            onclick={() => setPref("density", compact ? "comfy" : "compact")}
-            title={compact ? $t("settings.densityComfy") : $t("settings.densityCompact")}
-            aria-label={compact ? $t("settings.densityComfy") : $t("settings.densityCompact")}
-          >{#if compact}<Rows2 size={13} />{:else}<Rows3 size={13} />{/if}</button>
-        </div>
-        <button
-          class="btn btn-sm btn-primary add-btn"
-          onclick={() => void openAdd()}
-          title={$t("view.applications.add")}
-          aria-label={$t("view.applications.add")}
-        >
-          <Plus size={13} />
-          <span class="add-label">{$t("view.applications.add")}</span>
-        </button>
-      </div>
-
-      <!-- The legend labels columns only. Its grid is identical to AppRow's and
-           contains no controls, so it cannot overflow into SOURCE/SIGNAL/LEVEL. -->
-      <div class="legend" class:is-compact={compact} aria-hidden="true">
-        <span class="legend-cell">{$t("desk.source")}</span>
-        <span class="legend-cell">{$t("desk.signal")}</span>
-        <span class="legend-cell">{$t("desk.level")}</span>
-        <span></span><span></span><span></span>
-      </div>
-
-      <div class="channels">
+      <div class="channels surface">
         {#if $sortedApplications.length === 0}
           <div class="desk-empty">
-            {#if $searchQuery.trim()}
-              <EmptyState
-                icon={SearchX}
-                title={$t("view.applications.noMatch.title")}
-                body={$t("view.applications.noMatch.body", { query: $searchQuery.trim() })}
-              />
-            {:else}
-              <EmptyState
-                icon={AudioLines}
-                title={$t("view.applications.empty.title")}
-                body={$t("view.applications.empty.body")}
-              >
-                {#snippet action()}
-                  <button class="btn btn-primary" onclick={() => void openAdd()}>
-                    <Plus size={14} />
-                    {$t("view.applications.add")}
-                  </button>
-                {/snippet}
-              </EmptyState>
-            {/if}
+            <EmptyState
+              icon={AudioLines}
+              title={$t("view.applications.empty.title")}
+              body={$t("view.applications.empty.body")}
+            >
+              {#snippet action()}
+                <button class="btn btn-primary" onclick={() => void openAdd()}>
+                  <Plus size={14} />
+                  {$t("view.applications.add")}
+                </button>
+              {/snippet}
+            </EmptyState>
           </div>
         {:else}
           {#each $applicationSections as section (section.id)}
-            <div class="bank">
-              <div class="bank-head">
-                <span class="bank-name">{$t("section." + section.id)}</span>
-                <span class="bank-rule" aria-hidden="true"></span>
+            <section class="bank" aria-labelledby="bank-{section.id}">
+              <h2 class="bank-head" id="bank-{section.id}">
+                <span class="panel-label">{$t("section." + section.id)}</span>
                 <span class="bank-count mono">{section.apps.length}</span>
-              </div>
+              </h2>
               <ul class="bank-list">
                 {#each section.apps as app (app.app_key)}
                   <li
-                    animate:flip={{ duration: motionDuration(220) }}
-                    in:fly={{ y: 8, duration: motionDuration(220) }}
-                    out:fly={{ y: -4, duration: motionDuration(140) }}
+                    animate:flip={{ duration: motionDuration(200) }}
+                    in:fly={{ y: 6, duration: motionDuration(200) }}
+                    out:fly={{ y: -4, duration: motionDuration(130) }}
                   >
                     <AppRow
                       {app}
@@ -273,11 +261,8 @@
                       onToggleMute={() => void toggleAppMute(app)}
                       onToggleExpanded={() => toggleExpanded(app.app_key)}
                       onInspect={() =>
-                        inspectedAppKey.set(
-                          $inspectedAppKey === app.app_key ? null : app.app_key,
-                        )}
-                      onTogglePin={() =>
-                        void patchApplication(app.app_key, { pinned: !app.pinned })}
+                        inspectedAppKey.set($inspectedAppKey === app.app_key ? null : app.app_key)}
+                      onTogglePin={() => void patchApplication(app.app_key, { pinned: !app.pinned })}
                       onSessionInput={previewSessionVolume}
                       onSessionCommit={(liveId, value) => void commitSessionVolume(liveId, value)}
                       onSessionMute={(liveId, muted) => void toggleSessionMute(liveId, muted)}
@@ -285,23 +270,22 @@
                   </li>
                 {/each}
               </ul>
-            </div>
+            </section>
           {/each}
         {/if}
       </div>
     {/if}
   </div>
-
   {#if $inspectedApp}
     {@const target = $inspectedApp}
     <!-- Docked beside the desk when there is room; below that it overlays, so
-         it never squeezes the channels into initials. -->
+         it never squeezes the channel list. -->
     <button
       class="inspector-scrim"
       aria-label={$t("common.close")}
       onclick={() => inspectedAppKey.set(null)}
     ></button>
-    <aside class="inspector-slot" transition:fly={{ x: 24, duration: motionDuration(220) }}>
+    <aside class="inspector-slot" transition:fly={{ x: 24, duration: motionDuration(200) }}>
       <AppInspector
         app={target}
         groups={$groups}
@@ -346,133 +330,103 @@
   .desk {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+    column-gap: var(--space-4);
     height: 100%;
     min-height: 0;
-    background: var(--deck-bg);
   }
 
   .desk-main {
     display: flex;
     flex-direction: column;
+    gap: var(--space-3);
     width: 100%;
-    max-width: 1600px;
     min-width: 0;
     min-height: 0;
-    margin-inline: auto;
-    border-inline: 1px solid var(--deck-line);
   }
 
-  /* Only the channels scroll. The master and scene belt stay put, because on a
-     console the output section does not scroll away from you. */
-  .channels {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    scrollbar-gutter: stable;
-  }
-
-  .desk-empty {
-    padding: var(--space-6) var(--space-5);
-  }
-
-  .channel-tools {
+  .head-tools {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    min-height: 36px;
-    padding: 0 var(--space-4);
-    background: var(--bg-cap);
-    border-bottom: 1px solid var(--deck-line);
-  }
-  .tools-label {
-    font-size: var(--fs-2xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-muted);
   }
   .tools-filters {
     display: flex;
     align-items: center;
     gap: 2px;
-    margin-left: auto;
-  }
-  .add-btn {
-    height: 26px;
-    margin-left: var(--space-2);
+    padding: 2px;
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
   }
 
-  .legend {
-    display: grid;
-    grid-template-columns: minmax(168px, 1.1fr) 40px minmax(140px, 2fr) 48px 32px 60px;
-    align-items: center;
-    gap: var(--space-3);
-    height: 28px;
-    padding: 0 var(--space-4) 0 calc(var(--space-2) + 2px);
-    border-bottom: 1px solid var(--deck-line);
-    background: color-mix(in oklab, var(--bg-cap) 60%, transparent);
+  /* Scenes take the header's free width and give it back first. */
+  .head-scenes {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    justify-content: flex-end;
   }
-  .legend.is-compact {
-    grid-template-columns: minmax(150px, 1fr) 36px minmax(130px, 2fr) 44px 32px 60px;
-    gap: var(--space-2);
+  .head-scenes :global(.scene-bar) {
+    min-width: 0;
   }
-  .legend-cell {
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-placeholder);
+
+  /* The channel list takes the rest of the height and scrolls on its own, so
+     the output above never scrolls away. */
+  .channels {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 4px var(--space-2) var(--space-2);
+    scrollbar-gutter: stable;
   }
-  .bank {
-    padding-bottom: var(--space-2);
+
+  .desk-empty {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .bank + .bank {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--deck-line);
   }
   .bank-head {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4) var(--space-2) var(--space-4);
-  }
-  /* The first bank sits directly under the legend, which already separates it
-     from the tools above; a second gap there only wastes channel height. */
-  .bank:first-child .bank-head {
-    padding-top: var(--space-2);
-  }
-  .bank-name {
-    font-size: var(--fs-2xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-muted);
-  }
-  .bank-rule {
-    flex: 1;
-    height: 1px;
-    background: var(--deck-line);
+    gap: var(--space-2);
+    padding: 6px var(--space-4) 2px;
+    margin: 0;
+    font-size: inherit;
   }
   .bank-count {
     font-size: var(--fs-2xs);
-    font-weight: 700;
-    color: var(--text-placeholder);
+    font-weight: 650;
+    color: var(--text-faint);
     font-variant-numeric: tabular-nums;
   }
-
   .bank-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
     list-style: none;
     margin: 0;
     padding: 0;
   }
-
+  /* Docked, the inspector is a panel like its neighbours, not a slab glued to
+     the frame edge. */
   .inspector-slot {
     min-height: 0;
+    overflow: hidden;
     background: var(--bg-card);
-    border-left: 1px solid var(--deck-line-strong);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
   }
   .inspector-scrim {
     display: none;
   }
 
-  /* Docked only when the channels keep enough width to stay legible. */
+  /* Docked only when the channel list keeps enough width to stay useful. */
   @media (min-width: 1240px) {
     .desk.has-inspector {
       grid-template-columns: minmax(0, 1fr) var(--inspector-width);
@@ -485,15 +439,17 @@
       top: var(--chrome-height);
       right: 0;
       bottom: 0;
-      width: min(var(--inspector-overlay-width), calc(100vw - var(--rail-width) - 24px));
+      width: min(var(--inspector-overlay-width), calc(100vw - 24px));
       z-index: 80;
+      border-radius: 0;
+      border-width: 0 0 0 1px;
       box-shadow: var(--shadow-lg);
     }
     .inspector-scrim {
       display: block;
       position: fixed;
       top: var(--chrome-height);
-      left: var(--rail-width);
+      left: 0;
       right: 0;
       bottom: 0;
       z-index: 79;
@@ -513,49 +469,15 @@
       bottom: 0;
       width: auto;
       max-height: 82vh;
-      border-left: none;
-      border-top: 1px solid var(--deck-line-strong);
+      border-width: 1px 0 0;
       border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-      overflow: hidden;
     }
   }
 
-  @media (max-width: 900px) {
-    .legend,
-    .legend.is-compact {
-      grid-template-columns: minmax(150px, 1fr) 36px minmax(120px, 1.8fr) 44px 32px 30px;
-    }
-    .channel-tools {
-      min-height: 40px;
-      padding: 0 var(--space-3);
-    }
-    .tools-label {
-      display: none;
-    }
-    .add-btn {
-      height: 28px;
-    }
-  }
-
-  /* On a short window every band above the channels is competing with the
-     thing the user came for, so the legend and bank heads tighten. */
-  @media (max-height: 700px) {
-    .legend {
-      height: 24px;
-    }
-    .bank-head {
-      padding-top: var(--space-2);
-      padding-bottom: var(--space-1);
-    }
-  }
-
-  @media (max-width: 760px) {
-    .legend,
-    .legend.is-compact {
-      grid-template-columns: minmax(120px, 1fr) minmax(110px, 1.8fr) 42px 32px 30px;
-      padding-right: var(--space-3);
-    }
-    .legend-cell:nth-child(2) {
+  /* At the window's floor the add button keeps its icon and drops its label,
+     so the header stays one row. */
+  @media (max-width: 1000px) {
+    .add-label {
       display: none;
     }
   }

@@ -8,10 +8,10 @@
    * usually lose keyboard and screen-reader support, so the native element is
    * kept and only painted over.
    *
-   * Dragging fires `onInput` on every frame for optical feedback; `onCommit`
-   * fires once when the pointer or key is released. Callers send IPC from
-   * `onCommit` and repaint from `onInput`, which keeps a drag from flooding the
-   * audio worker with hundreds of calls.
+   * Dragging fires `onInput` on every frame; `onCommit` fires once when the
+   * pointer or key is released. Callers repaint and send a coalesced live level
+   * from `onInput` (see `liveSender` in `lib/stores`), so the sound follows the
+   * drag with one IPC call in flight, and `onCommit` guarantees the final value.
    */
   import { clampScalar } from "../lib/volume";
 
@@ -29,6 +29,7 @@
     size = "md",
     tone = "accent",
     indeterminate = false,
+    orientation = "horizontal",
   }: {
     /** Linear scalar, 0.0–1.0. */
     value?: number;
@@ -53,6 +54,14 @@
      * it by synchronizing everything.
      */
     indeterminate?: boolean;
+    /**
+     * A vertical fader is the channel-strip form. It uses the native
+     * `writing-mode: vertical-rl` slider rather than a rotated horizontal one,
+     * so the browser keeps pointer mapping, keyboard stepping and the slider
+     * role intact. A CSS `rotate()` would invert the drag direction and detach
+     * the hit area from the painted control.
+     */
+    orientation?: "horizontal" | "vertical";
   } = $props();
 
   let dragging = $state(false);
@@ -125,6 +134,7 @@
   class:is-indeterminate={indeterminate}
   data-size={size}
   data-tone={tone}
+  data-orientation={orientation}
   style:--range-percent="{percent}%"
 >
   <div class="range-track" aria-hidden="true">
@@ -166,7 +176,11 @@
   }
 
   /* The empty portion of the track stays visible at every level, so a row at
-     100% is still recognisably a slider rather than a filled bar. */
+     100% is still recognisably a slider rather than a filled bar.
+
+     Fully rounded, unlike the meter's square segments beside it: the round
+     capsule is the shape a user reads as "I can drag this", and the contrast
+     between the two shapes is what separates the control from the signal. */
   .range-track {
     position: absolute;
     left: 0;
@@ -174,18 +188,19 @@
     height: var(--slider-height);
     border-radius: var(--radius-full);
     background: var(--slider-track);
-    box-shadow: inset 0 0 0 1px var(--slider-track);
     overflow: hidden;
     transition:
       height var(--dur-fast) var(--ease),
       background var(--dur-fast) var(--ease);
   }
 
+  /* Flat ink, no gradient and no glow. The fill states a value; a gradient
+     would imply the level varies along the bar, which it does not. */
   .range-fill {
     height: 100%;
     width: var(--range-percent);
     border-radius: var(--radius-full);
-    background: var(--range-color, var(--accent));
+    background: var(--range-color, var(--slider-fill));
   }
 
   /* No width transition while dragging: the pointer is already the animation,
@@ -205,13 +220,13 @@
   }
 
   .range[data-size="sm"] {
-    height: 20px;
+    height: 22px;
   }
   .range[data-size="sm"] .range-track {
-    height: 3px;
+    height: 4px;
   }
   .range[data-size="lg"] .range-track {
-    height: 6px;
+    height: 8px;
   }
 
   .range:hover:not(.is-disabled) .range-track,
@@ -221,11 +236,89 @@
   }
   .range[data-size="lg"]:hover:not(.is-disabled) .range-track,
   .range[data-size="lg"].is-dragging .range-track {
-    height: 8px;
+    height: 10px;
+  }
+
+  /* ── Vertical fader ──────────────────────────────────────────────────────
+     The channel-strip form. The travel is a recessed slot cut into the strip,
+     the fill rises from the bottom, and the thumb is a wide cap that reads as a
+     physical grip. Everything below re-maps the horizontal geometry onto the
+     block axis; the input itself is switched with `writing-mode`, so pointer
+     direction, keyboard stepping and the slider role stay native. */
+  .range[data-orientation="vertical"] {
+    width: var(--slider-hit-area);
+    min-width: 0;
+    height: 100%;
+    justify-content: center;
+  }
+  .range[data-orientation="vertical"] .range-track {
+    left: 50%;
+    right: auto;
+    top: 0;
+    bottom: 0;
+    transform: translateX(-50%);
+    width: var(--slider-height);
+    height: auto;
+    border-radius: var(--radius-full);
+    box-shadow: var(--fader-slot-shadow);
+    transition:
+      width var(--dur-fast) var(--ease),
+      background var(--dur-fast) var(--ease);
+  }
+  .range[data-orientation="vertical"] .range-fill {
+    position: absolute;
+    inset: auto 0 0 0;
+    width: 100%;
+    height: var(--range-percent);
+  }
+  .range[data-orientation="vertical"]:not(.is-dragging) .range-fill {
+    transition: height var(--dur-fast) var(--ease-out);
+  }
+  .range[data-orientation="vertical"]:hover:not(.is-disabled) .range-track,
+  .range[data-orientation="vertical"].is-dragging .range-track {
+    height: auto;
+    width: var(--slider-height-hover);
+  }
+  .range[data-orientation="vertical"] input[type="range"] {
+    writing-mode: vertical-rl;
+    direction: rtl;
+    width: 100%;
+    height: 100%;
+  }
+  /* A wide, short cap rather than a circle: on a console the fader knob is a
+     grip you push, and its width is what makes the travel readable at a
+     glance. */
+  .range[data-orientation="vertical"] input[type="range"]::-webkit-slider-thumb {
+    width: var(--fader-cap-width);
+    height: var(--fader-cap-height);
+    border-radius: var(--radius-xs);
+    background: var(--fader-cap);
+    box-shadow: var(--fader-cap-shadow);
+  }
+  .range[data-orientation="vertical"] input[type="range"]::-moz-range-thumb {
+    width: var(--fader-cap-width);
+    height: var(--fader-cap-height);
+    border-radius: var(--radius-xs);
+    background: var(--fader-cap);
+    box-shadow: var(--fader-cap-shadow);
+  }
+  .range[data-orientation="vertical"]:hover input[type="range"]::-webkit-slider-thumb,
+  .range[data-orientation="vertical"] input[type="range"]:focus-visible::-webkit-slider-thumb,
+  .range[data-orientation="vertical"].is-dragging input[type="range"]::-webkit-slider-thumb {
+    width: var(--fader-cap-width);
+    height: var(--fader-cap-height);
+    background: var(--fader-cap-hover);
+    box-shadow: var(--fader-cap-shadow-hover);
+  }
+  .range[data-orientation="vertical"]:hover input[type="range"]::-moz-range-thumb,
+  .range[data-orientation="vertical"] input[type="range"]:focus-visible::-moz-range-thumb {
+    background: var(--fader-cap-hover);
+    box-shadow: var(--fader-cap-shadow-hover);
   }
 
   .range.is-muted .range-fill {
     background: var(--slider-fill-muted);
+    box-shadow: none;
   }
 
   /* Sessions disagree: a hatched full-width track says "no single value" far
@@ -271,7 +364,8 @@
 
   /* The thumb is always present: it is the only cue that separates a slider
      from the level meter beside it. It sits small and quiet at rest, then grows
-     on hover, focus and drag. */
+     on hover, focus and drag. The ring is a dark hairline rather than a glow,
+     so the thumb stays legible where it overlaps its own fill. */
   input[type="range"]::-webkit-slider-thumb {
     appearance: none;
     -webkit-appearance: none;
@@ -281,8 +375,8 @@
     background: var(--slider-thumb);
     border: none;
     box-shadow:
-      0 1px 3px var(--slider-thumb-ring),
-      0 0 0 1px var(--slider-thumb-ring);
+      0 0 0 1px var(--slider-thumb-ring),
+      var(--shadow-xs);
     transition:
       width var(--dur-fast) var(--spring),
       height var(--dur-fast) var(--spring),
@@ -296,8 +390,8 @@
     background: var(--slider-thumb);
     border: none;
     box-shadow:
-      0 1px 3px var(--slider-thumb-ring),
-      0 0 0 1px var(--slider-thumb-ring);
+      0 0 0 1px var(--slider-thumb-ring),
+      var(--shadow-xs);
   }
   input[type="range"]::-moz-range-track {
     height: 100%;
@@ -309,20 +403,28 @@
   input[type="range"]:focus-visible::-webkit-slider-thumb {
     width: var(--slider-thumb-size-hover);
     height: var(--slider-thumb-size-hover);
+    box-shadow:
+      0 0 0 1px var(--slider-thumb-ring),
+      var(--shadow-sm);
   }
   .range:hover input[type="range"]::-moz-range-thumb,
   input[type="range"]:focus-visible::-moz-range-thumb {
     width: var(--slider-thumb-size-hover);
     height: var(--slider-thumb-size-hover);
+    box-shadow:
+      0 0 0 1px var(--slider-thumb-ring),
+      var(--shadow-sm);
   }
 
+  /* Dragging adds a soft halo in the accent so the grabbed thumb is findable
+     under the pointer without the fill itself changing colour. */
   .range.is-dragging input[type="range"]::-webkit-slider-thumb {
     width: var(--slider-thumb-size-hover);
     height: var(--slider-thumb-size-hover);
     box-shadow:
-      0 1px 3px var(--slider-thumb-ring),
       0 0 0 1px var(--slider-thumb-ring),
-      0 0 0 6px var(--accent-dim);
+      0 0 0 6px var(--accent-dim),
+      var(--shadow-sm);
   }
 
   /* A locked session keeps its thumb so the row still reads as a volume

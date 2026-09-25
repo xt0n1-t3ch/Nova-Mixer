@@ -103,7 +103,6 @@
             <AppIcon
               src={candidate.icon}
               name={candidate.display_name}
-              appKey={candidate.app_key}
               size={30}
               dimmed={!candidate.running}
             />

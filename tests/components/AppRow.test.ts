@@ -85,12 +85,24 @@ describe("AppRow", () => {
     expect(screen.getByText("Locked")).toBeInTheDocument();
   });
 
-  it("keeps a closed application listed, with its settings reachable", () => {
+  it("keeps a saved application with no audio listed, with its settings reachable", () => {
     renderRow({ running: false, display_name: "Spotify" });
     expect(screen.getByText("Spotify")).toBeInTheDocument();
-    expect(screen.getByText("Closed")).toBeInTheDocument();
+    // "No audio", not "Closed": the backend only knows there is no session;
+    // the process may well be open.
+    expect(screen.getByText("No audio")).toBeInTheDocument();
     // The settings button is what makes an offline row worth showing at all.
     expect(screen.getByRole("button", { name: "Configure Spotify" })).toBeInTheDocument();
+  });
+
+  it("says Idle when every session is silent, instead of implying it plays", () => {
+    renderRow({
+      running: true,
+      executable_name: "claude.exe",
+      sessions: [makeSession({ state: "inactive" })],
+    });
+    expect(screen.getByText("Idle")).toBeInTheDocument();
+    expect(screen.queryByText("claude.exe")).not.toBeInTheDocument();
   });
 
   it("names the system sounds session instead of showing a host executable", () => {

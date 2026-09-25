@@ -5,11 +5,12 @@ use novamixer_contracts::{
 };
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, SystemTime},
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{error, info, warn};
@@ -62,6 +63,7 @@ impl SettingsStore {
     }
 
     pub fn load(&self) -> LoadReport {
+        self.remove_stale_temp_files();
         let main = self.settings_path();
         if !main.exists() && self.legacy_path.is_file() {
             match self.migrate_legacy() {
@@ -80,6 +82,7 @@ impl SettingsStore {
         match read_settings(&main) {
             Ok((settings, migrated)) => {
                 if migrated {
+                    let _guard = self.write_guard();
                     if let Err(error) = atomic_write_json(&main, &settings) {
                         error!(%error, path = %main.display(), "cannot write migrated settings");
                     }
@@ -118,27 +121,90 @@ impl SettingsStore {
         }
     }
 
+    /// Writes `settings.json`, first copying the previous good file to
+    /// `settings.backup.json`.
+    ///
+    /// Saves are serialized per data folder: the debounced autosave, command
+    /// handlers, and hotkey actions can all save in the same instant, and on
+    /// Windows a replace that races another writer's open or replace of the same
+    /// file fails with "Access is denied".
     pub fn save(&self, settings: &AppSettings) -> io::Result<()> {
+        let _guard = self.write_guard();
+        self.save_locked(settings)
+    }
+
+    fn save_locked(&self, settings: &AppSettings) -> io::Result<()> {
         fs::create_dir_all(&self.data_root)?;
         let path = self.settings_path();
-        if path.is_file() {
-            fs::copy(&path, self.backup_path())?;
+        if path.is_file() && read_settings(&path).is_ok() {
+            atomic_copy(&path, &self.backup_path())?;
         }
         atomic_write_json(&path, settings)
     }
 
     pub fn restore_backup(&self) -> io::Result<AppSettings> {
+        let _guard = self.write_guard();
         let (settings, _) = read_settings(&self.backup_path())?;
-        self.save(&settings)?;
+        self.save_locked(&settings)?;
         Ok(settings)
+    }
+
+    fn write_guard(&self) -> std::sync::MutexGuard<'static, ()> {
+        static LOCKS: OnceLock<Mutex<HashMap<PathBuf, &'static Mutex<()>>>> = OnceLock::new();
+        let lock = *LOCKS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(self.data_root.clone())
+            // One small lock per data folder for the life of the process.
+            .or_insert_with(|| Box::leak(Box::new(Mutex::new(()))));
+        lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Removes temp files abandoned by an interrupted or failed atomic write.
+    ///
+    /// Only names this store generates are touched
+    /// (`.settings.json.<pid>.<uuid>.tmp`, `.settings.backup.json.<pid>.<uuid>.tmp`),
+    /// and only once they are older than `STALE_TEMP_AGE`. A live write lasts
+    /// milliseconds, so the age alone is conclusive. Process liveness is not used:
+    /// process IDs are reused, and a running instance can itself own leaked files.
+    fn remove_stale_temp_files(&self) {
+        const STALE_TEMP_AGE: Duration = Duration::from_secs(5 * 60);
+        let Ok(entries) = fs::read_dir(&self.data_root) else {
+            return;
+        };
+        let now = SystemTime::now();
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if !name.to_str().is_some_and(is_settings_temp_name) {
+                continue;
+            }
+            let stale = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age >= STALE_TEMP_AGE);
+            if !stale {
+                continue;
+            }
+            match fs::remove_file(entry.path()) {
+                Ok(()) => info!(path = %entry.path().display(), "removed stale settings temp file"),
+                Err(error) => {
+                    warn!(%error, path = %entry.path().display(), "cannot remove stale settings temp file")
+                }
+            }
+        }
     }
 
     fn migrate_legacy(&self) -> io::Result<AppSettings> {
         let bytes = fs::read(&self.legacy_path)?;
         let legacy: LegacyConfig = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
         let mut settings = legacy.into_settings();
+        migrate_identities(&mut settings);
         settings.validate();
         fs::create_dir_all(&self.data_root)?;
+        let _guard = self.write_guard();
         fs::copy(
             &self.legacy_path,
             self.data_root.join("settings.legacy.json"),
@@ -152,14 +218,31 @@ impl SettingsStore {
 fn read_settings(path: &Path) -> io::Result<(AppSettings, bool)> {
     let bytes = fs::read(path)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
-    let migrated = value.get("schema_version").and_then(|v| v.as_u64()) == Some(1);
-    let mut settings = if migrated {
+    let schema_migrated = value.get("schema_version").and_then(|v| v.as_u64()) == Some(1);
+    let mut settings = if schema_migrated {
         migrate_v1(value)?
     } else {
         serde_json::from_value(value).map_err(io::Error::other)?
     };
+    let identities_migrated = migrate_identities(&mut settings);
     settings.validate();
-    Ok((settings, migrated))
+    Ok((settings, schema_migrated || identities_migrated))
+}
+
+/// Applies the current `app_key` rule to stored path identities and collapses
+/// entries that now name the same application (for example one per Squirrel
+/// `app-<version>` folder). See `audio_policy::migrate_path_identities`.
+fn migrate_identities(settings: &mut AppSettings) -> bool {
+    let changed = audio_policy::migrate_path_identities(
+        &mut settings.applications,
+        &mut settings.groups,
+        &mut settings.scenes,
+        |path| Path::new(path).is_file(),
+    );
+    if changed {
+        info!("collapsed stored application identities that now share one app_key");
+    }
+    changed
 }
 
 fn migrate_v1(mut value: serde_json::Value) -> io::Result<AppSettings> {
@@ -233,15 +316,70 @@ fn migrate_v1(mut value: serde_json::Value) -> io::Result<AppSettings> {
 }
 
 fn atomic_write_json(path: &Path, settings: &AppSettings) -> io::Result<()> {
-    let temp = path.with_extension("json.tmp");
     let bytes = serde_json::to_vec_pretty(settings).map_err(io::Error::other)?;
-    let mut file = File::create(&temp)?;
-    file.write_all(&bytes)?;
-    file.write_all(b"\n")?;
-    file.flush()?;
-    file.sync_all()?;
-    drop(file);
-    replace_file(&temp, path)
+    write_through_temp(path, |file| {
+        file.write_all(&bytes)?;
+        file.write_all(b"\n")
+    })
+}
+
+fn atomic_copy(source: &Path, destination: &Path) -> io::Result<()> {
+    let mut source = File::open(source)?;
+    write_through_temp(destination, |file| io::copy(&mut source, file).map(drop))
+}
+
+/// Writes a sibling temp file with `fill`, flushes it to disk, and swaps it into
+/// `destination`. Whatever step fails, the temp file is removed and the error
+/// is logged and returned.
+fn write_through_temp(
+    destination: &Path,
+    fill: impl FnOnce(&mut File) -> io::Result<()>,
+) -> io::Result<()> {
+    let temp = temporary_path(destination);
+    let result = File::create(&temp).and_then(|mut file| {
+        fill(&mut file)?;
+        file.flush()?;
+        file.sync_all()?;
+        drop(file);
+        replace_file(&temp, destination)
+    });
+    if let Err(error) = &result {
+        error!(%error, path = %destination.display(), "atomic settings write failed");
+        if let Err(cleanup) = fs::remove_file(&temp) {
+            if cleanup.kind() != io::ErrorKind::NotFound {
+                warn!(error = %cleanup, path = %temp.display(), "cannot remove settings temp file");
+            }
+        }
+    }
+    result
+}
+
+fn is_settings_temp_name(name: &str) -> bool {
+    let Some(inner) = name
+        .strip_prefix('.')
+        .and_then(|name| name.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let mut parts = inner.rsplitn(3, '.');
+    let (Some(id), Some(pid), Some(target)) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    matches!(target, "settings.json" | "settings.backup.json")
+        && pid.parse::<u32>().is_ok()
+        && uuid::Uuid::parse_str(id).is_ok()
+}
+
+fn temporary_path(destination: &Path) -> PathBuf {
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("settings");
+    destination.with_file_name(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ))
 }
 
 /// Replaces `destination` with `temp` in one step.
@@ -264,15 +402,36 @@ fn replace_file(temp: &Path, destination: &Path) -> io::Result<()> {
 
     let from = wide(temp);
     let to = wide(destination);
-    // SAFETY: both buffers are null-terminated and outlive the call.
-    unsafe {
-        MoveFileExW(
-            PCWSTR(from.as_ptr()),
-            PCWSTR(to.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
+    // Another process (antivirus, the search indexer, a sync client) can hold
+    // the destination open for a moment. Those failures are transient, so the
+    // swap is retried briefly before the error is returned.
+    let mut attempt = 0;
+    loop {
+        // SAFETY: both buffers are null-terminated and outlive the call.
+        let result = unsafe {
+            MoveFileExW(
+                PCWSTR(from.as_ptr()),
+                PCWSTR(to.as_ptr()),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        let Err(error) = result else {
+            return Ok(());
+        };
+        let code = error.code().0 as u32;
+        let error = if code & 0xFFFF_0000 == 0x8007_0000 {
+            io::Error::from_raw_os_error((code & 0xFFFF) as i32)
+        } else {
+            io::Error::other(error.message())
+        };
+        // ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
+        let transient = matches!(error.raw_os_error(), Some(5 | 32 | 33));
+        attempt += 1;
+        if !transient || attempt >= 5 {
+            return Err(error);
+        }
+        std::thread::sleep(Duration::from_millis(20 * attempt));
     }
-    .map_err(|error| io::Error::other(error.message()))
 }
 
 #[cfg(not(windows))]
@@ -567,6 +726,144 @@ mod tests {
     }
 
     #[test]
+    fn squirrel_version_entries_load_as_one_application() {
+        let root = tempdir().unwrap();
+        let store = SettingsStore::with_paths(root.path().to_path_buf(), PathBuf::new());
+        let base = "c:\\users\\xt0n1\\appdata\\local\\discord";
+        let old_key = format!("{base}\\app-1.0.9256\\discord.exe");
+        let new_key = format!("{base}\\app-1.0.9258\\discord.exe");
+        let mut settings = AppSettings::default();
+        let mut old = Application::offline(old_key.clone(), IdentityKind::Path, "Discord".into());
+        old.executable_path = Some(old_key.clone());
+        old.volume = 0.25;
+        old.pinned = true;
+        old.group_id = Some(settings.groups[0].id.clone());
+        let mut new = Application::offline(new_key.clone(), IdentityKind::Path, "Discord".into());
+        new.executable_path = Some(new_key.clone());
+        new.remembered = false;
+        settings.applications = vec![old, new];
+        settings.groups[0].app_keys = vec![old_key.clone()];
+        fs::write(
+            store.settings_path(),
+            serde_json::to_vec(&settings).unwrap(),
+        )
+        .unwrap();
+
+        let report = store.load();
+
+        let merged_key = format!("{base}\\app-*\\discord.exe");
+        assert!(report.migration_ran);
+        assert_eq!(report.settings.applications.len(), 1);
+        let app = &report.settings.applications[0];
+        assert_eq!(app.app_key, merged_key);
+        assert_eq!(app.volume, 0.25);
+        assert!(app.pinned && app.remembered);
+        assert_eq!(app.group_id, Some(report.settings.groups[0].id.clone()));
+        assert_eq!(report.settings.groups[0].app_keys, vec![merged_key.clone()]);
+        // The collapsed form is written back, so the next start is a no-op.
+        assert!(!store.load().migration_ran);
+        assert_eq!(
+            read_settings(&store.settings_path())
+                .unwrap()
+                .0
+                .applications[0]
+                .app_key,
+            merged_key
+        );
+    }
+
+    fn temp_files(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect()
+    }
+
+    #[test]
+    fn failed_replace_removes_its_temp_file_and_returns_the_error() {
+        let root = tempdir().unwrap();
+        let store = SettingsStore::with_paths(root.path().to_path_buf(), PathBuf::new());
+        // A directory where settings.json belongs makes the final replace fail
+        // after the temp file has been fully written.
+        fs::create_dir_all(store.settings_path()).unwrap();
+        assert!(store.save(&AppSettings::default()).is_err());
+        assert_eq!(temp_files(root.path()), Vec::<String>::new());
+
+        // The same for the backup copy, which is written first.
+        fs::remove_dir(store.settings_path()).unwrap();
+        store.save(&AppSettings::default()).unwrap();
+        fs::create_dir_all(store.backup_path()).unwrap();
+        assert!(store.save(&AppSettings::default()).is_err());
+        assert_eq!(temp_files(root.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn concurrent_saves_leave_only_settings_and_backup() {
+        let root = tempdir().unwrap();
+        let store = SettingsStore::with_paths(root.path().to_path_buf(), PathBuf::new());
+        store.save(&AppSettings::default()).unwrap();
+        let writers = 8;
+        let barrier = Arc::new(std::sync::Barrier::new(writers));
+        let handles: Vec<_> = (0..writers)
+            .map(|writer| {
+                let store = store.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let mut settings = AppSettings::default();
+                    let mut failures = vec![];
+                    for round in 0..25 {
+                        settings.volume_step = (writer * 25 + round) as f32 / 1000.0;
+                        barrier.wait();
+                        if let Err(error) = store.save(&settings) {
+                            failures.push(error.to_string());
+                        }
+                    }
+                    failures
+                })
+            })
+            .collect();
+        let failures: Vec<String> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(failures, Vec::<String>::new(), "every save must succeed");
+        let mut names: Vec<String> = fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["settings.backup.json", "settings.json"]);
+        assert!(read_settings(&store.settings_path()).is_ok());
+        assert!(read_settings(&store.backup_path()).is_ok());
+    }
+
+    #[test]
+    fn load_removes_only_stale_settings_temp_files() {
+        let root = tempdir().unwrap();
+        let store = SettingsStore::with_paths(root.path().to_path_buf(), PathBuf::new());
+        store.save(&AppSettings::default()).unwrap();
+        let stale = [
+            ".settings.json.9228.752e03e3-290a-4205-be3b-4ee7f607da4e.tmp",
+            ".settings.backup.json.13900.270453cc-ce50-4d66-ab59-ae5d2d213b7b.tmp",
+        ];
+        let fresh = ".settings.json.4242.6c7f5289-05d0-483f-b0e9-adee3e8bcde8.tmp";
+        let unrelated = ".other.json.9228.0d835604-b740-4c38-9ec8-e500a496e70f.tmp";
+        let old = std::time::SystemTime::now() - Duration::from_secs(3600);
+        for name in stale.iter().chain([&unrelated]) {
+            let file = File::create(root.path().join(name)).unwrap();
+            file.set_modified(old).unwrap();
+        }
+        File::create(root.path().join(fresh)).unwrap();
+
+        store.load();
+
+        let mut left = temp_files(root.path());
+        left.sort();
+        assert_eq!(left, vec![unrelated.to_owned(), fresh.to_owned()]);
+    }
+
+    #[test]
     fn corrupt_main_recovers_backup() {
         let root = tempdir().unwrap();
         let store = SettingsStore::with_paths(root.path().to_path_buf(), PathBuf::new());
@@ -591,5 +888,24 @@ mod tests {
         store.save(&second).unwrap();
         assert_eq!(read_settings(&store.backup_path()).unwrap().0, first);
         assert_eq!(read_settings(&store.settings_path()).unwrap().0, second);
+    }
+
+    #[test]
+    fn save_does_not_replace_good_backup_with_corrupt_main() {
+        let root = tempdir().unwrap();
+        let store = SettingsStore::with_paths(root.path().to_path_buf(), PathBuf::new());
+        let backup = AppSettings::default();
+        let mut previous = backup.clone();
+        previous.volume_step = 0.1;
+        store.save(&backup).unwrap();
+        store.save(&previous).unwrap();
+        fs::write(store.settings_path(), b"corrupt").unwrap();
+
+        let mut current = backup.clone();
+        current.volume_step = 0.2;
+        store.save(&current).unwrap();
+
+        assert_eq!(read_settings(&store.backup_path()).unwrap().0, backup);
+        assert_eq!(read_settings(&store.settings_path()).unwrap().0, current);
     }
 }

@@ -9,7 +9,7 @@
   import { onDestroy } from "svelte";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import X from "@lucide/svelte/icons/x";
-  import { formatAccelerator } from "../lib/ux";
+  import { acceleratorFromEvent, formatAccelerator } from "../lib/ux";
   import { t } from "../lib/i18n/index";
 
   let {
@@ -24,44 +24,6 @@
 
   let recording = $state(false);
 
-  /** Keys that cannot stand alone as a shortcut. */
-  const MODIFIERS = new Set(["Control", "Shift", "Alt", "Meta"]);
-
-  /** DOM `event.key` values that Tauri names differently. The media keys need
-   *  no entry: `AudioVolumeUp` and friends are already Tauri's own names. */
-  const KEY_ALIASES: Record<string, string> = {
-    ArrowUp: "Up",
-    ArrowDown: "Down",
-    ArrowLeft: "Left",
-    ArrowRight: "Right",
-    " ": "Space",
-  };
-
-  /** Keys that are safe to bind on their own because they carry no other
-   *  meaning. Anything else needs a modifier. */
-  const STANDALONE = /^(AudioVolume(Up|Down|Mute)|MediaTrack(Next|Previous)|MediaPlayPause|MediaStop|F\d{1,2})$/;
-
-  function toAccelerator(event: KeyboardEvent): string | null {
-    if (MODIFIERS.has(event.key)) return null;
-
-    const parts: string[] = [];
-    if (event.ctrlKey) parts.push("Control");
-    if (event.altKey) parts.push("Alt");
-    if (event.shiftKey) parts.push("Shift");
-    if (event.metaKey) parts.push("Super");
-
-    const raw = KEY_ALIASES[event.key] ?? event.key;
-    const key = raw.length === 1 ? raw.toUpperCase() : raw;
-
-    // A bare letter bound globally would swallow that key everywhere, so a
-    // modifier is required unless the key is one of the dedicated media or
-    // function keys.
-    if (parts.length === 0 && !STANDALONE.test(key)) return null;
-
-    parts.push(key);
-    return parts.join("+");
-  }
-
   function onKeydown(event: KeyboardEvent): void {
     event.preventDefault();
     event.stopPropagation();
@@ -70,7 +32,7 @@
       recording = false;
       return;
     }
-    const next = toAccelerator(event);
+    const next = acceleratorFromEvent(event);
     if (next) {
       onChange(next);
       recording = false;
@@ -163,7 +125,7 @@
     animation: hotkey-pulse 1.4s var(--ease) infinite;
   }
   .hotkey-slot.is-empty .hotkey-hint {
-    color: var(--text-placeholder);
+    color: var(--text-faint);
   }
 
   .hotkey-kbd {

@@ -6,18 +6,13 @@ use novamixer_contracts::{
     AppCandidate, Application, ApplicationPatch, AudioDevice, MixerSnapshot,
 };
 use tauri::State;
-pub fn audio_error(e: audio_sessions::AudioError) -> AppError {
-    match e {
-        audio_sessions::AudioError::SessionGone => AppError::SessionGone,
-        audio_sessions::AudioError::AppUnknown => AppError::AppUnknown,
-        audio_sessions::AudioError::NotControllable => AppError::NotControllable,
-        audio_sessions::AudioError::InvalidVolume => AppError::Validation(e.to_string()),
-        audio_sessions::AudioError::Unavailable(message) => AppError::AudioUnavailable(message),
-        audio_sessions::AudioError::Unsupported(message) => AppError::Unsupported(message),
-    }
+
+fn audio_error(error: audio_sessions::AudioError) -> AppError {
+    error.into()
 }
-fn app_error(e: novamixer_application::ApplicationError) -> AppError {
-    AppError::Other(e.to_string())
+
+fn app_error(error: novamixer_application::ApplicationError) -> AppError {
+    error.into()
 }
 #[tauri::command]
 pub async fn list_applications(state: State<'_, AppState>) -> AppResult<MixerSnapshot> {

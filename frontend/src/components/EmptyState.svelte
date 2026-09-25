@@ -45,7 +45,7 @@
     padding: var(--space-8) var(--space-5);
     border: 1px dashed var(--border);
     border-radius: var(--radius-2xl);
-    background: var(--bg-cap);
+    background: var(--bg-sunken);
   }
 
   .empty-icon {

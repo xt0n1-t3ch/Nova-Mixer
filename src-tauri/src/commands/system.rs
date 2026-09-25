@@ -19,7 +19,7 @@ pub async fn set_efficiency_mode(
             .application
             .save_settings(settings)
             .await
-            .map_err(|e| AppError::Other(e.to_string()))?;
+            .map_err(AppError::from)?;
     }
     Ok(status)
 }

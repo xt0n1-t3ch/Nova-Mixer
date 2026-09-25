@@ -14,7 +14,6 @@ import {
   masterPeak,
   pendingVolumes,
   previewAppVolume,
-  searchQuery,
   sessionPeaks,
   settings,
   sortApplications,
@@ -29,7 +28,6 @@ beforeEach(() => {
   sessionPeaks.set({});
   pendingVolumes.set({});
   master.set(null);
-  searchQuery.set("");
   settings.set(defaultSettings());
 });
 
@@ -226,26 +224,6 @@ describe("visibility preferences", () => {
     const config = defaultSettings();
     settings.set({ ...config, ui_prefs: { ...config.ui_prefs, show_system_sounds: false } });
     expect(get(visibleApplications).map((app) => app.app_key)).toEqual(["a.exe"]);
-  });
-
-  it("filter by the search box across name and executable", () => {
-    applyApplicationAdded(
-      makeApp({ app_key: "a.exe", display_name: "Spotify", executable_name: "Spotify.exe" }),
-    );
-    applyApplicationAdded(
-      makeApp({ app_key: "b.exe", display_name: "Edge", executable_name: "msedge.exe" }),
-    );
-
-    searchQuery.set("msedge");
-    expect(get(visibleApplications).map((app) => app.app_key)).toEqual(["b.exe"]);
-  });
-
-  it("find an application by the name the user gave it", () => {
-    applyApplicationAdded(
-      makeApp({ app_key: "a.exe", display_name: "Work chat", custom_name: "Work chat" }),
-    );
-    searchQuery.set("work");
-    expect(get(visibleApplications)).toHaveLength(1);
   });
 });
 
