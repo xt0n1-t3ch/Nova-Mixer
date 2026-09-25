@@ -1,0 +1,23 @@
+# Normalize text to LF in the repository and in every checkout.
+#
+# `cargo xtask check-bindings` compares the committed generated files byte for
+# byte with what the generator writes (LF). A Windows checkout with
+# core.autocrlf=true turned them into CRLF and the check failed on CI even
+# though nothing was stale. Pinning LF keeps generated files, formatters and
+# the check in agreement on every platform.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF, which PowerShell and cmd expect.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets are never converted.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.msi binary
+*.woff binary
+*.woff2 binary

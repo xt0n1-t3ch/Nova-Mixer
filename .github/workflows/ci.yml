@@ -48,3 +48,6 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with: { fetch-depth: 0 }
       - uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          # gitleaks-action needs the token to read pull request commits.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
