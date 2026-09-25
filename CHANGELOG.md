@@ -4,6 +4,8 @@ All notable changes to NovaMixer appear in this file. The format follows [Keep a
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-25
+
 NovaMixer 2.0.0 is a complete rewrite in Tauri 2, Rust, and Svelte 5. It replaces the earlier C#
 and WPF implementation, which is not part of this repository.
 
@@ -11,16 +13,11 @@ and WPF implementation, which is not part of this repository.
 
 - A public README with a banner, showcase screenshots of the real app, and install instructions,
   plus an `llms.txt` index for search and AI crawlers.
+- Release assets: an NSIS installer, an MSI, and a portable ZIP that keeps its settings in a
+  `data` folder beside the executable, each with a SHA-256 checksum.
 - `scripts/capture-showcase.mjs`, which captures README screenshots from the running app over the
   Chrome DevTools Protocol, so they show real applications and real meter levels.
-- A collapsible mixer navigation rail: 64px for maximum fader room or 208px with visible labels. A
-  dedicated disclosure keeps the choice discoverable; at the 860px window floor the rail collapses
-  without overwriting the user's saved preference, then restores it when the window grows.
-- A console-specific shell instead of the earlier DLSSync-shaped sidebar and toolbar: full-width
-  master deck, dedicated scene transport, channel tools, column legend, and continuous ruled
-  application channels. The inspector docks only when enough desk width remains and overlays below
-  that threshold instead of crushing application names.
-- Settings now uses a section index, working panels, and a live status rail with the current output,
+- Settings uses a section index, working panels, and a live status rail with the current output,
   application/session counts, controllability, scenes/groups, and verified efficiency-mode state.
   About combines product identity, runtime facts, capabilities, and the same live diagnostics.
 - **The mixer is now built around applications rather than Windows audio sessions.** Windows gives
@@ -83,7 +80,6 @@ and WPF implementation, which is not part of this repository.
 - Volume is stored as a linear amplitude scalar everywhere, matching what the Windows mixer reports
   for the same session.
 
-[Unreleased]: https://github.com/xt0n1-t3ch/NovaMixer/compare/v2.0.0...HEAD
 
 ### Removed
 
@@ -144,8 +140,6 @@ and WPF implementation, which is not part of this repository.
 - Real application icons and product names are resolved for remembered/offline applications too,
   not only for live sessions. Icons are cached in settings so Thorium, Microsoft Edge, and Spotify
   keep their actual logos across restarts instead of reverting to letter badges.
-- Channel tools no longer overflow the SOURCE/SIGNAL/LEVEL legend: Scenes, view tools, and the
-  column legend each own a stable band, and scene chips scroll only in their middle viewport.
 - The 860x600 minimum layout keeps complete names and secondary state such as `2 streams` and
   `In Main`; it sheds pin and meter affordances before it sheds facts.
 - A global shortcut the platform rejects no longer prevents the application from starting. The
@@ -155,3 +149,6 @@ and WPF implementation, which is not part of this repository.
   uncontrollable; it rebuilds the endpoint instead.
 - The settings file is now replaced in a single operation, so an interrupted save can no longer
   leave the configuration missing.
+
+[Unreleased]: https://github.com/xt0n1-t3ch/Nova-Mixer/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/xt0n1-t3ch/Nova-Mixer/releases/tag/v2.0.0
