@@ -32,7 +32,8 @@ impl SettingsStore {
     pub fn discover() -> io::Result<Self> {
         let exe = std::env::current_exe()?;
         let exe_dir = exe.parent().unwrap_or(Path::new("."));
-        if exe_dir.join("portable.txt").is_file() {
+        // The marker name is owned by product.toml ([distribution.portable]).
+        if exe_dir.join("portable.flag").is_file() {
             return Ok(Self::with_paths(exe_dir.join("data"), PathBuf::new()));
         }
         let roaming = dirs::config_dir()
