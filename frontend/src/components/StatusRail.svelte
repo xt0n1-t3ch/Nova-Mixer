@@ -29,7 +29,11 @@
   });
 
   let managed = $derived($applications.length);
-  let running = $derived($applications.filter((app) => app.running).length);
+  // Playing means an active session now, not merely an open application.
+  let running = $derived(
+    $applications.filter((app) => app.sessions.some((session) => session.state === "active"))
+      .length,
+  );
   let sessions = $derived(
     $applications.reduce((total, app) => total + app.sessions.length, 0),
   );
@@ -145,17 +149,20 @@
 </aside>
 
 <style>
-  /* The rail runs the full height of the frame rather than stopping wherever
-     its last fact happens to land; the trailing space belongs to the panel,
-     not to a gap under a floating card. */
+  /* `align-self: start` matters. The rail sits in a stretch-aligned grid on
+     Settings and About, which ran its border to the bottom of the frame and
+     left roughly 440px of empty bordered box under the last fact. A panel that
+     ends where its content ends reads as finished; one padded out with void
+     reads as broken, or as content that failed to load. */
   .status-rail {
     display: flex;
     flex-direction: column;
+    align-self: start;
     gap: var(--space-3);
     min-width: 0;
     padding: var(--space-4);
     border-radius: var(--radius-lg);
-    background: var(--bg-cap);
+    background: var(--bg-card);
     border: 1px solid var(--border);
   }
 
@@ -213,7 +220,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: var(--letter-wide);
-    color: var(--text-placeholder);
+    color: var(--text-faint);
   }
 
   .status-facts {
@@ -245,7 +252,7 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--text-placeholder);
+    background: var(--text-faint);
     flex-shrink: 0;
   }
   .dot.is-live {

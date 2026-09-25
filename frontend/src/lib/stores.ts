@@ -33,12 +33,11 @@ import {
   type PeakBatch,
   type Scene,
 } from "./api";
-import { debounce, matchesQuery, type ViewId } from "./ux";
+import { debounce, type ViewId } from "./ux";
 
 /* ── Navigation and chrome ──────────────────────────────────────────────── */
 
 export const currentView: Writable<ViewId> = writable("applications");
-export const searchQuery: Writable<string> = writable("");
 export const selectedGroupId: Writable<string | null> = writable(null);
 export const shortcutOverlayOpen: Writable<boolean> = writable(false);
 export const commandPaletteOpen: Writable<boolean> = writable(false);
@@ -102,21 +101,19 @@ export const inspectedApp: Readable<Application | null> = derived(
   ([$applications, $key]) => $applications.find((app) => app.app_key === $key) ?? null,
 );
 
-/** Applications after the user's visibility preferences and the search box. */
+/**
+ * Applications after the user's visibility preferences. Finding one by name is
+ * the command palette's job, so the desk itself is never filtered by text.
+ */
 export const visibleApplications: Readable<Application[]> = derived(
-  [applications, settings, searchQuery],
-  ([$applications, $settings, $query]) => {
+  [applications, settings],
+  ([$applications, $settings]) => {
     const prefs = $settings?.ui_prefs;
     return $applications.filter((app) => {
       if (app.hidden && !(prefs?.show_hidden ?? false)) return false;
       if (app.is_system_sounds && !(prefs?.show_system_sounds ?? true)) return false;
       if (!app.running && !(prefs?.show_offline ?? true)) return false;
-      return matchesQuery($query, [
-        app.display_name,
-        app.custom_name,
-        app.executable_name,
-        app.executable_path,
-      ]);
+      return true;
     });
   },
 );
@@ -192,15 +189,52 @@ export function dismissToast(id: number): void {
 
 /* ── Application mutations ──────────────────────────────────────────────── */
 
-/** Optimistic paint during a drag. No IPC — `commitAppVolume` sends it. */
+/**
+ * Sends a level to Windows while the fader moves, so the sound follows the
+ * pointer instead of jumping when it is released.
+ *
+ * At most one call per target is in flight. While it runs, newer values only
+ * replace the pending one, and the newest is sent when the call returns. A
+ * fast drag therefore costs one IPC round trip at a time and always ends on the
+ * last value, never on a stale one that finished late.
+ */
+function liveSender(send: (target: string, value: number) => Promise<void>) {
+  const pending = new Map<string, number>();
+  const inFlight = new Set<string>();
+  async function pump(target: string): Promise<void> {
+    inFlight.add(target);
+    try {
+      while (pending.has(target)) {
+        const value = pending.get(target)!;
+        pending.delete(target);
+        await send(target, value);
+      }
+    } finally {
+      inFlight.delete(target);
+    }
+  }
+  return (target: string, value: number): Promise<void> => {
+    pending.set(target, value);
+    return inFlight.has(target) ? Promise.resolve() : pump(target);
+  };
+}
+
+const sendAppVolume = liveSender(setAppVolume);
+const sendSessionVolume = liveSender(setSessionVolume);
+const sendMasterVolume = liveSender((_target, value) => setMasterVolume(value));
+
+/** Paints the level at once and sends it to Windows, coalesced. */
 export function previewAppVolume(appKey: string, volume: number): void {
   pendingVolumes.update((map) => ({ ...map, [appKey]: volume }));
+  sendAppVolume(appKey, volume).catch(() => {
+    /* reported by the commit on release */
+  });
 }
 
 export async function commitAppVolume(appKey: string, volume: number): Promise<void> {
-  previewAppVolume(appKey, volume);
+  pendingVolumes.update((map) => ({ ...map, [appKey]: volume }));
   try {
-    await setAppVolume(appKey, volume);
+    await sendAppVolume(appKey, volume);
   } catch (error) {
     pushToast(errorMessage(error), "danger");
     pendingVolumes.update(({ [appKey]: _dropped, ...rest }) => rest);
@@ -224,12 +258,15 @@ export async function toggleAppMute(app: Application): Promise<void> {
 
 export function previewSessionVolume(liveId: string, volume: number): void {
   pendingVolumes.update((map) => ({ ...map, [liveId]: volume }));
+  sendSessionVolume(liveId, volume).catch(() => {
+    /* reported by the commit on release */
+  });
 }
 
 export async function commitSessionVolume(liveId: string, volume: number): Promise<void> {
-  previewSessionVolume(liveId, volume);
+  pendingVolumes.update((map) => ({ ...map, [liveId]: volume }));
   try {
-    await setSessionVolume(liveId, volume);
+    await sendSessionVolume(liveId, volume);
   } catch (error) {
     pushToast(errorMessage(error), "danger");
     pendingVolumes.update(({ [liveId]: _dropped, ...rest }) => rest);
@@ -314,12 +351,15 @@ export async function reorder(appKeys: string[]): Promise<void> {
 
 export function previewMasterVolume(volume: number): void {
   master.update((state) => (state ? { ...state, volume } : state));
+  sendMasterVolume("master", volume).catch(() => {
+    /* reported by the commit on release */
+  });
 }
 
 export async function commitMasterVolume(volume: number): Promise<void> {
-  previewMasterVolume(volume);
+  master.update((state) => (state ? { ...state, volume } : state));
   try {
-    await setMasterVolume(volume);
+    await sendMasterVolume("master", volume);
   } catch (error) {
     pushToast(errorMessage(error), "danger");
   }

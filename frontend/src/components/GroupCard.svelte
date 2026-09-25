@@ -2,13 +2,14 @@
   import Pencil from "@lucide/svelte/icons/pencil";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Star from "@lucide/svelte/icons/star";
-  import type { Group } from "../lib/api";
+  import type { Application, Group } from "../lib/api";
   import { formatPercent } from "../lib/volume";
   import AppIcon from "./AppIcon.svelte";
   import { t } from "../lib/i18n/index";
 
   let {
     group,
+    applications = [],
     memberCount,
     isActive,
     isSelected,
@@ -18,6 +19,8 @@
     onDelete,
   }: {
     group: Group;
+    /** Known applications, used to show each member's real icon and name. */
+    applications?: Application[];
     memberCount: number;
     isActive: boolean;
     isSelected: boolean;
@@ -29,7 +32,12 @@
 
   // Three faces plus a counter reads faster than a long wrapping row of icons.
   const PREVIEW_LIMIT = 3;
-  let preview = $derived(group.app_keys.slice(0, PREVIEW_LIMIT));
+  let preview = $derived(
+    group.app_keys.slice(0, PREVIEW_LIMIT).map((key) => {
+      const app = applications.find((candidate) => candidate.app_key === key);
+      return { key, icon: app?.icon ?? null, name: app?.display_name ?? key };
+    }),
+  );
   let overflow = $derived(Math.max(0, memberCount - PREVIEW_LIMIT));
 </script>
 
@@ -52,8 +60,8 @@
     </span>
 
     <span class="group-apps">
-      {#each preview as appKey (appKey)}
-        <AppIcon src={null} name={appKey} appKey={appKey} size={22} />
+      {#each preview as member (member.key)}
+        <span title={member.name}><AppIcon src={member.icon} name={member.name} size={24} /></span>
       {/each}
       {#if overflow > 0}
         <span class="group-overflow mono">+{overflow}</span>
@@ -148,14 +156,17 @@
   .group-volume::before {
     content: "·";
     margin-right: var(--space-2);
-    color: var(--text-placeholder);
+    color: var(--text-faint);
   }
 
   .group-apps {
     display: flex;
     align-items: center;
-    gap: 4px;
-    min-height: 22px;
+    gap: 6px;
+    min-height: 24px;
+  }
+  .group-apps > span {
+    display: inline-flex;
   }
   .group-overflow {
     font-size: var(--fs-2xs);

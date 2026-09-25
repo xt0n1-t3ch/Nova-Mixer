@@ -18,6 +18,13 @@ import type {
   MixerSnapshot,
 } from "../lib/api";
 import { applyPeaks } from "../lib/stores";
+import claudeIcon from "./icons/claude.png";
+import discordIcon from "./icons/discord.png";
+import edgeIcon from "./icons/msedge.png";
+import nvidiaIcon from "./icons/nvidia.png";
+import spotifyIcon from "./icons/spotify.png";
+import steamIcon from "./icons/steam.png";
+import thoriumIcon from "./icons/thorium.png";
 
 function session(overrides: Partial<AudioSession>): AudioSession {
   return {
@@ -61,14 +68,19 @@ function app(overrides: Partial<Application>): Application {
 }
 
 /**
- * Covers every state the design has to hold: pinned, remembered, several
- * sessions collapsed into one row, muted, closed-but-configured, locked, and
- * system sounds.
+ * Covers every state the design has to hold, with real applications only:
+ * pinned, remembered, several sessions collapsed into one strip, muted, idle
+ * (a session with no sound), locked (a session that refuses control), saved
+ * with no session, and system sounds.
+ *
+ * The icons are real 128px shell icons produced by `crates/app-icons`, so the
+ * preview judges the same artwork the shipped app shows.
  */
 const APPLICATIONS: Application[] = [
   app({
     app_key: "spotify.exe",
     display_name: "Spotify",
+    icon: spotifyIcon,
     executable_name: "Spotify.exe",
     executable_path: "C:\\Users\\xt0n1\\AppData\\Roaming\\Spotify\\Spotify.exe",
     volume: 0.45,
@@ -81,6 +93,7 @@ const APPLICATIONS: Application[] = [
   app({
     app_key: "discord.exe",
     display_name: "Discord",
+    icon: discordIcon,
     executable_name: "Discord.exe",
     executable_path: "C:\\Users\\xt0n1\\AppData\\Local\\Discord\\Discord.exe",
     volume: 0.8,
@@ -107,6 +120,7 @@ const APPLICATIONS: Application[] = [
   app({
     app_key: "msedge.exe",
     display_name: "Microsoft Edge",
+    icon: edgeIcon,
     executable_name: "msedge.exe",
     executable_path: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     volume: 0.62,
@@ -117,6 +131,7 @@ const APPLICATIONS: Application[] = [
   app({
     app_key: "thorium.exe",
     display_name: "Thorium",
+    icon: thoriumIcon,
     executable_name: "thorium.exe",
     volume: 0.12,
     muted: true,
@@ -131,26 +146,53 @@ const APPLICATIONS: Application[] = [
       }),
     ],
   }),
+  // Open with a session but silent: Windows keeps the session `inactive`
+  // between sounds, and the strip must say "Idle", not "Playing".
   app({
-    app_key: "securehost.exe",
-    display_name: "Secure Host",
-    executable_name: "SecureHost.exe",
-    volume: 1,
-    controllable: false,
+    app_key: "claude.exe",
+    identity_kind: "aumid",
+    display_name: "Claude",
+    icon: claudeIcon,
+    executable_name: "claude.exe",
+    executable_path:
+      "C:\\Program Files\\WindowsApps\\Claude_2.9939.2.0_x64__pzs8sxrjxfjjc\\app\\claude.exe",
+    volume: 0.7,
     sort_order: 4,
     sessions: [
-      session({ live_id: "endpoint-1::secure", app_key: "securehost.exe", controllable: false }),
+      session({ live_id: "endpoint-1::claude", app_key: "claude.exe", state: "inactive" }),
     ],
   }),
+  // A protected overlay process whose session refuses volume calls. This is
+  // the real "Locked" case: Windows reports the session, and rejects control.
+  app({
+    app_key: "nvidia overlay.exe",
+    display_name: "NVIDIA Overlay",
+    icon: nvidiaIcon,
+    executable_name: "NVIDIA Overlay.exe",
+    executable_path: "C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\CEF\\NVIDIA Overlay.exe",
+    volume: 1,
+    controllable: false,
+    sort_order: 5,
+    sessions: [
+      session({
+        live_id: "endpoint-1::nvidia",
+        app_key: "nvidia overlay.exe",
+        controllable: false,
+      }),
+    ],
+  }),
+  // Saved with a remembered level but no audio session right now. It stays on
+  // the desk so its level can be set before it plays again.
   app({
     app_key: "steam.exe",
     display_name: "Steam",
+    icon: steamIcon,
     executable_name: "steam.exe",
     executable_path: "C:\\Program Files (x86)\\Steam\\steam.exe",
     volume: 0.7,
     remembered: true,
     running: false,
-    sort_order: 5,
+    sort_order: 6,
     sessions: [],
   }),
   app({
@@ -161,7 +203,7 @@ const APPLICATIONS: Application[] = [
     identity_kind: "filename",
     volume: 0.6,
     is_system_sounds: true,
-    sort_order: 6,
+    sort_order: 7,
     sessions: [
       session({
         live_id: "endpoint-1::system",
@@ -342,35 +384,11 @@ export function installPreviewBackend(options: PreviewOptions): void {
   };
 }
 
-/** Starts the metering loop so the level meters carry believable, varied levels. */
+/**
+ * The preview has no audio device, so it has no signal to meter. It sends one
+ * batch of zero peaks and never animates. Moving meters here would be invented
+ * data; the shipped app draws Windows' own `GetPeakValue` readings instead.
+ */
 export function startPreviewMetering(): void {
-  // Each application gets its own rate and depth, so a screenshot shows
-  // genuinely different levels rather than a row of identical bars.
-  const shapes = [
-    { key: "spotify.exe", live: "endpoint-1::spotify", rate: 0.9, base: 0.55, depth: 0.35 },
-    { key: "discord.exe", live: "endpoint-1::discord-voice", rate: 1.7, base: 0.4, depth: 0.28 },
-    { key: "msedge.exe", live: "endpoint-1::edge", rate: 0.4, base: 0.25, depth: 0.2 },
-    { key: "securehost.exe", live: "endpoint-1::secure", rate: 1.2, base: 0.72, depth: 0.22 },
-  ];
-
-  let tick = 0;
-  const advance = (): void => {
-    tick += 1;
-    const t = tick / 20;
-    applyPeaks({
-      timestamp_ms: tick * 50,
-      master_peak: 0.55 + Math.sin(t * 1.1) * 0.3,
-      applications: shapes.map((shape) => {
-        const peak = Math.max(0, shape.base + Math.sin(t * shape.rate) * shape.depth);
-        return {
-          app_key: shape.key,
-          peak,
-          sessions: [{ live_id: shape.live, peak }],
-        };
-      }),
-    });
-  };
-
-  advance();
-  window.setInterval(advance, 50);
+  applyPeaks({ timestamp_ms: 0, master_peak: 0, applications: [] });
 }

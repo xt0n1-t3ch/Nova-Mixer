@@ -6,6 +6,8 @@ NovaMixer stores applications and controls their live Windows audio sessions. Th
 
 An `Application` is the durable object shown in the Applications view. Its `app_key` comes from the Application User Model ID, canonical executable path, or executable name, in that order.
 
+A canonical path replaces a Squirrel.Windows version folder such as `app-1.0.9258` with `app-*`, so Discord, Slack, and similar applications keep one identity across updates. When a session starts from a new version folder, it attaches to the saved application and inherits its remembered level. The application's `executable_path` then moves to the running executable. Settings saved before this rule collapse into one application when they load. `contracts/ipc.md` defines the rule and the merge.
+
 An `AudioSession` is a live child identified by `live_id`. One application can own several sessions. NovaMixer groups those sessions under one application and keeps the application after its last session expires.
 
 ## Application controls set policy

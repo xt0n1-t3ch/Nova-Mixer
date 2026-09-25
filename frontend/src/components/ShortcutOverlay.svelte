@@ -20,7 +20,7 @@
         <div class="shortcut">
           <dt>{$t(shortcut.descriptionKey)}</dt>
           <dd>
-            {#each shortcut.keys as key, index (key)}
+            {#each shortcut.keys as key, index (index)}
               {#if index > 0}<span class="sep" aria-hidden="true">then</span>{/if}
               <span class="kbd">{keyLabel(key)}</span>
             {/each}
@@ -60,6 +60,6 @@
   }
   .sep {
     font-size: var(--fs-2xs);
-    color: var(--text-placeholder);
+    color: var(--text-faint);
   }
 </style>

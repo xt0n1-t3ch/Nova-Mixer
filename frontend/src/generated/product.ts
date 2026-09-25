@@ -3,9 +3,9 @@ export const PRODUCT = {
   "author": "xt0n1",
   "authorUrl": "https://github.com/xt0n1-t3ch",
   "identifier": "io.github.xt0n1-t3ch.novamixer",
-  "issues": "https://github.com/xt0n1-t3ch/NovaMixer/issues",
+  "issues": "https://github.com/xt0n1-t3ch/Nova-Mixer/issues",
   "name": "NovaMixer",
-  "releases": "https://github.com/xt0n1-t3ch/NovaMixer/releases",
-  "repository": "https://github.com/xt0n1-t3ch/NovaMixer",
+  "releases": "https://github.com/xt0n1-t3ch/Nova-Mixer/releases",
+  "repository": "https://github.com/xt0n1-t3ch/Nova-Mixer",
   "version": "2.0.0"
 } as const;

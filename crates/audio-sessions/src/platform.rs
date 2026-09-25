@@ -32,6 +32,10 @@ use windows::{
 const CLSID_STD_GLOBAL_INTERFACE_TABLE: GUID =
     GUID::from_u128(0x00000323_0000_0000_c000_000000000046);
 
+/// Event context stamped on every volume and mute change NovaMixer makes, so its
+/// own notifications can be told apart from changes made by other applications.
+static NOVAMIXER_EVENT_CONTEXT: GUID = GUID::from_u128(0x6e6f7661_6d69_7865_7200_000000000001);
+
 pub fn spawn(
     applications: Vec<Application>,
     groups: Vec<Group>,
@@ -73,11 +77,15 @@ struct Worker {
     manager_sink: IAudioSessionNotification,
     sessions: HashMap<String, LiveSession>,
     applications: HashMap<String, Application>,
+    remembered_policy: HashSet<String>,
     policy_applied: HashSet<String>,
     groups: Vec<Group>,
     icons: IconCache,
     callback: EventCallback,
     metering_active: bool,
+    /// Whether the last emitted batch was entirely silent. Silence is sent once,
+    /// so the meters settle at zero, and then not repeated every tick.
+    last_batch_silent: bool,
     started: Instant,
     scene_ramp: Option<SceneRamp>,
 }
@@ -108,6 +116,8 @@ impl Worker {
         mut groups: Vec<Group>,
         callback: EventCallback,
     ) -> Result<Self> {
+        let mut applications = applications;
+        migrate_persisted_identities(&mut applications, &mut groups);
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(winerr)?;
         let endpoint_sink: IMMNotificationClient = EndpointSink {
@@ -135,6 +145,12 @@ impl Worker {
             .RegisterSessionNotification(&manager_sink)
             .map_err(winerr)?;
 
+        let applications = deduplicate_applications(applications, &mut groups);
+        let remembered_policy = applications
+            .values()
+            .filter(|app| app.remembered)
+            .map(|app| app.app_key.clone())
+            .collect();
         let mut worker = Self {
             sender,
             enumerator,
@@ -147,12 +163,14 @@ impl Worker {
             endpoint_sink,
             manager_sink,
             sessions: HashMap::new(),
-            applications: deduplicate_applications(applications, &mut groups),
+            applications,
+            remembered_policy,
             policy_applied: HashSet::new(),
             groups,
             icons: IconCache::default(),
             callback,
             metering_active: false,
+            last_batch_silent: false,
             started: Instant::now(),
             scene_ramp: None,
         };
@@ -268,9 +286,17 @@ impl Worker {
         let meter = control.cast().ok();
         let group_id =
             audio_policy::group_for(&app_key, &self.groups).map(|group| group.id.clone());
-        let icon = executable_path
+        // Packaged apps draw their logo from the AppsFolder item; their
+        // executables often carry only a generic or missing icon.
+        let icon = metadata
             .as_ref()
-            .and_then(|path| self.icons.icon_for_path(Path::new(path)));
+            .and_then(|item| item.aumid.as_deref())
+            .and_then(|aumid| self.icons.icon_for_aumid(aumid))
+            .or_else(|| {
+                executable_path
+                    .as_ref()
+                    .and_then(|path| self.icons.icon_for_path(Path::new(path)))
+            });
         let identity_kind = if metadata
             .as_ref()
             .and_then(|item| item.aumid.as_ref())
@@ -338,13 +364,17 @@ impl Worker {
             let persisted = self.applications.remove(old_key).expect("merge key exists");
             let merged = merge_discovered_application(persisted, &session.application);
             replace_group_key(&mut self.groups, old_key, &key);
+            if self.remembered_policy.remove(old_key) {
+                self.remembered_policy.insert(key.clone());
+            }
             self.applications.insert(key.clone(), merged);
+        } else if let Some(app) = self.applications.get_mut(&key) {
+            refresh_from_live(app, &session.application);
         } else {
             self.applications
-                .entry(key.clone())
-                .or_insert_with(|| session.application.clone());
+                .insert(key.clone(), session.application.clone());
         }
-        if emit {
+        if emit || self.remembered_policy.contains(&key) {
             self.apply_policy(&mut session);
         }
         self.sessions.insert(live_id, session);
@@ -393,13 +423,20 @@ impl Worker {
 
     unsafe fn apply_policy(&mut self, session: &mut LiveSession) {
         let key = session.data.app_key.clone();
-        if let Some(app) = self.applications.get(&key).filter(|app| app.remembered) {
-            if session.simple.SetMute(app.muted, ptr::null()).is_ok() {
+        if let Some(app) = self.applications.get(&key).filter(|app| {
+            app.remembered
+                && (self.remembered_policy.contains(&key) || self.policy_applied.contains(&key))
+        }) {
+            if session
+                .simple
+                .SetMute(app.muted, &NOVAMIXER_EVENT_CONTEXT)
+                .is_ok()
+            {
                 session.data.muted = app.muted;
             }
             if session
                 .simple
-                .SetMasterVolume(app.volume, ptr::null())
+                .SetMasterVolume(app.volume, &NOVAMIXER_EVENT_CONTEXT)
                 .is_ok()
             {
                 session.data.volume = app.volume;
@@ -410,12 +447,20 @@ impl Worker {
         let policy =
             audio_policy::policy_for_new_session(audio_policy::group_for(&key, &self.groups));
         if let Some(muted) = policy.muted {
-            if session.simple.SetMute(muted, ptr::null()).is_ok() {
+            if session
+                .simple
+                .SetMute(muted, &NOVAMIXER_EVENT_CONTEXT)
+                .is_ok()
+            {
                 session.data.muted = muted;
             }
         }
         if let Some(volume) = policy.volume {
-            if session.simple.SetMasterVolume(volume, ptr::null()).is_ok() {
+            if session
+                .simple
+                .SetMasterVolume(volume, &NOVAMIXER_EVENT_CONTEXT)
+                .is_ok()
+            {
                 session.data.volume = volume;
             }
         }
@@ -426,8 +471,10 @@ impl Worker {
         app.sessions = self
             .sessions
             .values()
-            .filter(|s| s.data.app_key == key)
-            .map(|s| s.data.clone())
+            .filter(|session| {
+                session.data.app_key == key && session.data.state != SessionState::Expired
+            })
+            .map(|session| session.data.clone())
             .collect();
         app.running = !app.sessions.is_empty();
         app.controllable = app.sessions.iter().any(|s| s.controllable);
@@ -461,7 +508,9 @@ impl Worker {
     unsafe fn run(&mut self, receiver: crossbeam_channel::Receiver<Command>) {
         let mut next_reconcile = Instant::now() + Duration::from_secs(10);
         let mut next_meter = Instant::now();
+        let mut applied_class = 0;
         loop {
+            follow_process_priority(&mut applied_class);
             let next_ramp = self
                 .scene_ramp
                 .as_ref()
@@ -506,7 +555,10 @@ impl Worker {
                 Ok(Command::SetMasterVolume { volume, reply }) => {
                     let result = self
                         .endpoint_volume
-                        .SetMasterVolumeLevelScalar(audio_policy::clamp_scalar(volume), ptr::null())
+                        .SetMasterVolumeLevelScalar(
+                            audio_policy::clamp_scalar(volume),
+                            &NOVAMIXER_EVENT_CONTEXT,
+                        )
                         .map_err(|err| self.map_endpoint_error(err));
                     if result.is_ok() {
                         if let Ok(master) = self.master() {
@@ -518,7 +570,7 @@ impl Worker {
                 Ok(Command::SetMasterMute { muted, reply }) => {
                     let result = self
                         .endpoint_volume
-                        .SetMute(muted, ptr::null())
+                        .SetMute(muted, &NOVAMIXER_EVENT_CONTEXT)
                         .map_err(|err| self.map_endpoint_error(err));
                     if result.is_ok() {
                         if let Ok(master) = self.master() {
@@ -537,7 +589,20 @@ impl Worker {
                     reply,
                 }) => {
                     let mut groups = groups;
-                    self.applications = deduplicate_applications(applications, &mut groups);
+                    let mut applications = applications;
+                    migrate_persisted_identities(&mut applications, &mut groups);
+                    let live = self
+                        .sessions
+                        .values()
+                        .map(|session| session.application.clone())
+                        .collect();
+                    let (applications, remembered_policy) =
+                        merge_settings_with_live(applications, live, &mut groups);
+                    let policy_applied =
+                        remap_policy_keys(&self.applications, &self.policy_applied, &applications);
+                    self.applications = applications;
+                    self.remembered_policy = remembered_policy;
+                    self.policy_applied = policy_applied;
                     self.groups = groups;
                     let _ = reply.send(Ok(()));
                 }
@@ -636,10 +701,27 @@ impl Worker {
             let _ = session
                 .control
                 .UnregisterAudioSessionNotification(&session.sink);
+            let key = session.data.app_key;
+            let Some(app) = self.aggregate(&key) else {
+                return;
+            };
+            // An unremembered record is one settings no longer mention; it was
+            // only being held so a still-playing source stayed controllable.
+            // Once its last session ends nothing justifies the row, so it is
+            // dropped rather than lingering as a forgotten application. This
+            // mirrors `Registry::remove`; the two must not drift.
+            let forgotten = !app.running && !app.remembered;
+            if forgotten {
+                self.applications.remove(&key);
+                self.policy_applied.remove(&key);
+                self.remembered_policy.remove(&key);
+            }
             if emit {
-                if let Some(app) = self.aggregate(&session.data.app_key) {
-                    (self.callback)(AudioEvent::ApplicationUpdated(app));
-                }
+                (self.callback)(if forgotten {
+                    AudioEvent::ApplicationRemoved { app_key: key }
+                } else {
+                    AudioEvent::ApplicationUpdated(app)
+                });
             }
         }
     }
@@ -670,7 +752,7 @@ impl Worker {
                 .GetMute()
                 .map_err(|err| self.map_endpoint_error(err))?
                 .as_bool(),
-            peak: self.endpoint_meter.GetPeakValue().unwrap_or(0.0),
+            peak: meter_level(self.endpoint_meter.GetPeakValue().unwrap_or(0.0)),
         })
     }
 
@@ -760,7 +842,7 @@ impl Worker {
         if let Some(value) = master_value {
             let _ = self
                 .endpoint_volume
-                .SetMasterVolumeLevelScalar(value, ptr::null());
+                .SetMasterVolumeLevelScalar(value, &NOVAMIXER_EVENT_CONTEXT);
         }
         for (key, value) in values {
             let _ = self.set_app_volume_internal(&key, value);
@@ -799,10 +881,16 @@ impl Worker {
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
-            if let Some(session) = self.sessions.get_mut(&id) {
-                if session.simple.SetMasterVolume(volume, ptr::null()).is_ok() {
-                    session.data.volume = volume;
-                }
+            let result = self.sessions.get_mut(&id).and_then(|session| {
+                session.data.controllable.then(|| {
+                    session
+                        .simple
+                        .SetMasterVolume(volume, &NOVAMIXER_EVENT_CONTEXT)
+                        .map(|()| session.data.volume = volume)
+                })
+            });
+            if let Some(Err(error)) = result {
+                let _ = self.map_session_error(&id, error);
             }
         }
         if let Some(app) = self.aggregate(key) {
@@ -831,11 +919,13 @@ impl Worker {
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
-            let result = self.sessions.get_mut(&id).map(|session| {
-                session
-                    .simple
-                    .SetMute(muted, ptr::null())
-                    .map(|()| session.data.muted = muted)
+            let result = self.sessions.get_mut(&id).and_then(|session| {
+                session.data.controllable.then(|| {
+                    session
+                        .simple
+                        .SetMute(muted, &NOVAMIXER_EVENT_CONTEXT)
+                        .map(|()| session.data.muted = muted)
+                })
             });
             if let Some(Err(error)) = result {
                 let _ = self.map_session_error(&id, error);
@@ -861,7 +951,10 @@ impl Worker {
             return Err(AudioError::InvalidVolume);
         }
         let session = self.sessions.get_mut(id).ok_or(AudioError::SessionGone)?;
-        if let Err(error) = session.simple.SetMasterVolume(volume, ptr::null()) {
+        if let Err(error) = session
+            .simple
+            .SetMasterVolume(volume, &NOVAMIXER_EVENT_CONTEXT)
+        {
             return Err(self.map_session_error(id, error));
         }
         session.data.volume = volume;
@@ -884,7 +977,7 @@ impl Worker {
             }
         }
         let session = self.sessions.get_mut(id).ok_or(AudioError::SessionGone)?;
-        if let Err(error) = session.simple.SetMute(muted, ptr::null()) {
+        if let Err(error) = session.simple.SetMute(muted, &NOVAMIXER_EVENT_CONTEXT) {
             return Err(self.map_session_error(id, error));
         }
         session.data.muted = muted;
@@ -895,8 +988,8 @@ impl Worker {
         Ok(())
     }
 
-    unsafe fn emit_peaks(&self) {
-        let master_peak = self.endpoint_meter.GetPeakValue().unwrap_or(0.0);
+    unsafe fn emit_peaks(&mut self) {
+        let master_peak = meter_level(self.endpoint_meter.GetPeakValue().unwrap_or(0.0));
         let applications = self
             .applications
             .keys()
@@ -911,7 +1004,7 @@ impl Worker {
                             .and_then(|m| m.GetPeakValue().ok())
                             .map(|peak| SessionPeak {
                                 live_id: s.data.live_id.clone(),
-                                peak,
+                                peak: meter_level(peak),
                             })
                     })
                     .collect();
@@ -921,7 +1014,12 @@ impl Worker {
                     sessions,
                 })
             })
-            .collect();
+            .collect::<Vec<AppPeak>>();
+        let silent = master_peak <= 0.0 && applications.iter().all(|app| app.peak <= 0.0);
+        if silent && self.last_batch_silent {
+            return;
+        }
+        self.last_batch_silent = silent;
         (self.callback)(AudioEvent::Peaks(PeakBatch {
             timestamp_ms: self.started.elapsed().as_millis() as u64,
             master_peak,
@@ -1153,8 +1251,15 @@ impl IAudioSessionEvents_Impl for SessionSink_Impl {
         &self,
         _new_volume: f32,
         _new_mute: BOOL,
-        _event_context: *const GUID,
+        event_context: *const GUID,
     ) -> windows::core::Result<()> {
+        // A change NovaMixer made itself is already in the registry and already
+        // emitted. Echoing it back queued a full session refresh behind the next
+        // fader step, which made levels trail the fader during a drag. Changes
+        // from any other application still refresh.
+        if unsafe { event_context.as_ref() } == Some(&NOVAMIXER_EVENT_CONTEXT) {
+            return Ok(());
+        }
         let _ = self
             .sender
             .send(Command::SessionChanged(self.live_id.clone()));
@@ -1218,6 +1323,31 @@ unsafe fn exempt_audio_thread_from_throttling() {
         std::mem::size_of_val(&state) as u32,
     ) {
         warn!(%error, "cannot exempt audio worker from power throttling");
+    }
+}
+
+/// Efficiency mode puts the process in `IDLE_PRIORITY_CLASS`, where a normal-relative thread
+/// runs at base priority 4 and any normal-priority busy thread on the system starves it. While
+/// the process is idle-class, the worker raises itself to `THREAD_PRIORITY_TIME_CRITICAL`, the
+/// only relative level above base 8 in that class; otherwise it stays at normal priority. The
+/// worker blocks between short bursts, so the raised level costs no sustained CPU.
+unsafe fn follow_process_priority(applied_class: &mut u32) {
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, GetCurrentThread, GetPriorityClass, SetThreadPriority,
+        IDLE_PRIORITY_CLASS, THREAD_PRIORITY_NORMAL, THREAD_PRIORITY_TIME_CRITICAL,
+    };
+    let class = GetPriorityClass(GetCurrentProcess());
+    if class == 0 || class == *applied_class {
+        return;
+    }
+    let level = if class == IDLE_PRIORITY_CLASS.0 {
+        THREAD_PRIORITY_TIME_CRITICAL
+    } else {
+        THREAD_PRIORITY_NORMAL
+    };
+    match SetThreadPriority(GetCurrentThread(), level) {
+        Ok(()) => *applied_class = class,
+        Err(error) => warn!(%error, "cannot adjust audio worker priority"),
     }
 }
 

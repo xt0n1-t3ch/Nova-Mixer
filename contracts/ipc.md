@@ -36,6 +36,23 @@ Consequences the implementation must honour:
 `identity_kind` records which one matched, so the interface can warn that a name-matched application
 may need relinking after a move or reinstall.
 
+A path identity replaces every directory component that is a Squirrel.Windows version folder with
+the fixed token `app-*`. A version folder is `app-` followed by two or more dot-separated all-digit
+parts, compared case-insensitively (`app-1.0.9256`). Squirrel installs each update into a new
+folder, so without this rule Discord, Slack, and similar applications would change identity on
+every update. The file name is never rewritten, and folders such as `app`, `apps`, `app-data`,
+`app-1`, or `myapp-1.0` keep their name. For example
+`C:\Users\x\AppData\Local\Discord\app-1.0.9258\Discord.exe` resolves to
+`c:\users\x\appdata\local\discord\app-*\discord.exe`. `executable_path` stays the concrete path of
+the executable last seen running.
+
+Loading settings re-derives stored `path` identities with this rule. Entries that now share an
+`app_key` collapse into one, and group `app_keys` and scene entries are rewritten to the new key
+without duplicates. The kept entry is the one whose `executable_path` exists, else the one with the
+highest version folder, else the first. `pinned` and `hidden` survive when any merged entry had
+them. `custom_name`, `group_id`, and `icon` fall back to another merged entry when the kept one has
+none. The remembered `volume` and `muted` come from the first ranked entry that is `remembered`.
+
 ## Types
 
 ### `Application`
@@ -50,7 +67,7 @@ The persistent, user-facing object. One row in the Applications view.
 | `custom_name` | `string \| null` | User's rename. `null` restores the discovered name. |
 | `executable_name` | `string \| null` | e.g. `"Discord.exe"`. |
 | `executable_path` | `string \| null` | Canonical full path when known. |
-| `icon` | `string \| null` | 32x32 PNG `data:` URL, or `null`. |
+| `icon` | `string \| null` | PNG `data:` URL, longest edge at most 128 px, or `null`. Roughly 10–30 KB of base64 per application. |
 | `volume` | `number` | The application's level, `0.0`–`1.0`. See "Aggregate semantics". |
 | `muted` | `boolean` | |
 | `mixed` | `boolean` | `true` when live sessions disagree and no policy has been applied yet. The interface shows an indeterminate control rather than inventing an average. |
@@ -212,7 +229,7 @@ application registry already owns every other detail.
 |:---|:---|:---|
 | `theme` | `"dark" \| "light"` | |
 | `language` | `string` | `"en"` or `"es"`. |
-| `sidebar_collapsed` | `boolean` | |
+| `sidebar_collapsed` | `boolean` | Unused since the navigation moved to the top bar. Kept so existing settings files load unchanged. |
 | `density` | `"compact" \| "comfy"` | |
 | `show_offline` | `boolean` | Show applications that are not currently running. |
 | `show_hidden` | `boolean` | Reveal entries marked `hidden`. |
@@ -335,7 +352,7 @@ can build one by ear rather than by typing numbers.
 | Field | Type | Notes |
 |:---|:---|:---|
 | `supported` | `boolean` | `false` on a Windows build without EcoQoS. |
-| `enabled` | `boolean` | Currently applied. |
+| `enabled` | `boolean` | Queried from the running process: EcoQoS **and** `IDLE_PRIORITY_CLASS`. Never the saved setting. |
 | `detail` | `string \| null` | Why it is unsupported, or why applying failed. |
 
 ## Events

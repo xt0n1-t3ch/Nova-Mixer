@@ -64,7 +64,6 @@
     <AppIcon
       src={app.icon}
       name={app.display_name}
-      appKey={app.app_key}
       size={40}
       isSystem={app.is_system_sounds}
       dimmed={!app.running}
@@ -255,7 +254,7 @@
     gap: var(--space-3);
     padding: var(--space-4);
     border-bottom: 1px solid var(--border);
-    background: var(--bg-cap);
+    background: var(--bg-sunken);
   }
   .head-text {
     flex: 1;
@@ -279,7 +278,7 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--text-placeholder);
+    background: var(--text-faint);
     flex-shrink: 0;
   }
   .status-dot.is-live {

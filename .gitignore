@@ -19,9 +19,13 @@ tests/e2e/test-results/
 coverage/
 .audit/
 
-# Legacy .NET build output inside the archive
-old/**/bin/
-old/**/obj/
+# Legacy C#/WPF implementation, kept locally for reference and never published
+old/
+
+# Local agent session files and loose review captures
+.zcode/
+/novamixer-*.png
+/nul
 
 # Editors
 .vscode/
@@ -44,7 +48,6 @@ secrets/
 
 # Logs
 *.log
-!old/build_log.txt
 
 # Design-review screenshots
 .preview/

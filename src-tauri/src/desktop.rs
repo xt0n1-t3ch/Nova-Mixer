@@ -14,11 +14,49 @@ const SHOW_HIDE_ID: &str = "tray-show-hide";
 const MUTE_ID: &str = "tray-mute";
 const QUIT_ID: &str = "tray-quit";
 
+pub fn show_startup_error(message: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::{
+            core::PCWSTR,
+            Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK},
+        };
+
+        fn wide(value: &str) -> Vec<u16> {
+            std::ffi::OsStr::new(value)
+                .encode_wide()
+                .chain(Some(0))
+                .collect()
+        }
+
+        let title = wide("NovaMixer could not start");
+        let message = wide(message);
+        // SAFETY: both UTF-16 buffers are null-terminated and outlive the call;
+        // a null owner is required because startup has no usable window yet.
+        unsafe {
+            let _ = MessageBoxW(
+                None,
+                PCWSTR(message.as_ptr()),
+                PCWSTR(title.as_ptr()),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+
+    #[cfg(not(windows))]
+    eprintln!("NovaMixer could not start: {message}");
+}
+
 pub fn setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
     build_tray(app)?;
     let settings = app.state::<AppState>().application.settings();
-    sync_autostart(app, settings.launch_on_startup)?;
-    register_hotkeys(app, &settings.hotkeys)?;
+    if let Err(error) = sync_autostart(app, settings.launch_on_startup) {
+        tracing::warn!(%error, "cannot apply autostart preference during startup");
+    }
+    if let Err(error) = register_hotkeys(app, &settings.hotkeys) {
+        tracing::warn!(%error, "cannot initialize global hotkeys");
+    }
     if settings.start_minimized {
         if let Some(window) = app.get_webview_window("main") {
             window.hide()?;
@@ -125,12 +163,36 @@ fn sync_autostart<R: Runtime>(
     enabled: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let autostart = app.autolaunch();
-    if enabled && !autostart.is_enabled()? {
-        autostart.enable()?;
-    } else if !enabled && autostart.is_enabled()? {
-        autostart.disable()?;
+    // `is_enabled` is only consulted when disabling: enabling runs every time.
+    let registered = !enabled && autostart.is_enabled()?;
+    match autostart_action(enabled, registered) {
+        AutostartAction::Register => autostart.enable()?,
+        AutostartAction::Unregister => autostart.disable()?,
+        AutostartAction::None => {}
     }
     Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AutostartAction {
+    Register,
+    Unregister,
+    None,
+}
+
+/// Decides how to reconcile the `launch_on_startup` preference with Windows.
+///
+/// The plugin's `is_enabled` only checks that a `Run` value named `NovaMixer`
+/// exists; it does not compare the command. A value left by another build (a
+/// debug binary, an older install folder) would then keep launching that stale
+/// executable. `enable()` overwrites the value with the current executable and
+/// is idempotent, so an enabled preference always re-registers.
+fn autostart_action(enabled: bool, registered: bool) -> AutostartAction {
+    match (enabled, registered) {
+        (true, _) => AutostartAction::Register,
+        (false, true) => AutostartAction::Unregister,
+        (false, false) => AutostartAction::None,
+    }
 }
 
 fn spawn_hotkey<R: Runtime>(app: AppHandle<R>, action: HotkeyAction) {
@@ -139,6 +201,13 @@ fn spawn_hotkey<R: Runtime>(app: AppHandle<R>, action: HotkeyAction) {
             tracing::warn!(error = %err, "global hotkey action failed");
             return;
         }
+        // A group hotkey changes the group's level in settings; the interface
+        // shows that value, so it needs the updated settings, not only the
+        // per-application events the audio worker already sent.
+        let state = app.state::<AppState>();
+        let settings = state.application.settings();
+        *state.settings.write() = settings.clone();
+        let _ = app.emit("settings-updated", settings);
         let _ = app.emit("hotkey-fired", serde_json::json!({ "action": action }));
     });
 }
@@ -308,4 +377,21 @@ fn volume_icon(volume: f32, muted: bool) -> Image<'static> {
         }
     }
     Image::new_owned(rgba, SIZE as u32, SIZE as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{autostart_action, AutostartAction};
+
+    #[test]
+    fn enabled_autostart_reregisters_even_when_a_value_exists() {
+        assert_eq!(autostart_action(true, true), AutostartAction::Register);
+        assert_eq!(autostart_action(true, false), AutostartAction::Register);
+    }
+
+    #[test]
+    fn disabled_autostart_only_removes_an_existing_value() {
+        assert_eq!(autostart_action(false, true), AutostartAction::Unregister);
+        assert_eq!(autostart_action(false, false), AutostartAction::None);
+    }
 }

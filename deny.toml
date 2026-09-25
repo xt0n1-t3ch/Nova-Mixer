@@ -3,6 +3,17 @@ all-features = true
 targets = ["x86_64-pc-windows-msvc"]
 [advisories]
 yanked = "deny"
+# The unmaintained rust-unic crates reach the build only through Tauri
+# (tauri-utils -> urlpattern). They carry no known vulnerability, and they
+# can only be removed by an upstream Tauri release. Revisit when Tauri drops
+# urlpattern 0.3.
+ignore = [
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range, via tauri-utils -> urlpattern; unmaintained, no vulnerability" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common, via tauri-utils -> urlpattern; unmaintained, no vulnerability" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property, via tauri-utils -> urlpattern; unmaintained, no vulnerability" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version, via tauri-utils -> urlpattern; unmaintained, no vulnerability" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident, via tauri-utils -> urlpattern; unmaintained, no vulnerability" },
+]
 [licenses]
 confidence-threshold = 0.8
 allow = ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT", "MPL-2.0", "Unicode-3.0", "Zlib"]

@@ -4,8 +4,9 @@ use crate::{
 };
 use novamixer_contracts::{AppSettings, HotkeyBinding};
 use tauri::{Emitter, State};
+
 fn app_error(error: novamixer_application::ApplicationError) -> AppError {
-    AppError::Other(error.to_string())
+    error.into()
 }
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> AppSettings {

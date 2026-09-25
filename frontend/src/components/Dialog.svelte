@@ -150,7 +150,7 @@
     gap: var(--space-2);
     padding: var(--space-4) var(--space-5);
     border-top: 1px solid var(--border);
-    background: var(--bg-cap);
+    background: var(--bg-sunken);
   }
   /* A confirmation has no body, so the head would otherwise sit tight against
      the footer rule. */

@@ -46,7 +46,7 @@ pub fn run() {
             paths.ensure_dirs()?;
             let handle = app.handle().clone();
             let application =
-                novamixer_application::NovaMixerApplication::start(move |event| match event {
+                match novamixer_application::NovaMixerApplication::start(move |event| match event {
                     audio_sessions::AudioEvent::ApplicationAdded(value) => {
                         let _ = handle.emit("application-added", value);
                     }
@@ -69,8 +69,15 @@ pub fn run() {
                     audio_sessions::AudioEvent::Peaks(value) => {
                         let _ = handle.emit("peaks", value);
                     }
-                })
-                .map_err(|error| error.to_string())?;
+                }) {
+                    Ok(application) => application,
+                    Err(error) => {
+                        let message = format!("Windows audio could not be initialized.\n\n{error}");
+                        tracing::error!(%error, "application startup failed");
+                        desktop::show_startup_error(&message);
+                        return Err(error.into());
+                    }
+                };
             let efficiency_enabled = application.settings().efficiency_mode;
             app.manage(state::AppState::new(application));
             if efficiency_enabled {
@@ -80,6 +87,23 @@ pub fn run() {
                 }
             }
             desktop::setup(app.handle()).map_err(|error| error.to_string())?;
+            // The worker has adopted the sessions that were already playing; write
+            // what they report about their executables (a Squirrel app's current
+            // `app-<version>` folder) back to the saved applications.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = handle.state::<state::AppState>();
+                match state.application.sync_live_identities().await {
+                    Ok(Some(settings)) => {
+                        *state.settings.write() = settings.clone();
+                        let _ = handle.emit("settings-updated", settings);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::warn!(%error, "cannot save live application paths at startup")
+                    }
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| {

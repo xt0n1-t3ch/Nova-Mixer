@@ -2,18 +2,25 @@
   /**
    * Peak level meter.
    *
-   * The backend sends raw peaks in batches; this component owns the ballistics.
-   * Peaks attack instantly so a transient is never dropped, then decay
-   * exponentially, which is how a hardware VU meter behaves and what makes a
+   * The backend sends Windows peak readings in batches; this component owns the
+   * ballistics. Peaks attack instantly so a transient is never dropped, then
+   * decay exponentially, which is how a hardware meter behaves and what makes a
    * level readable rather than a strobe. A hold marker keeps the recent maximum
    * visible so a short spike leaves a trace.
    *
-   * Animation runs on rAF driven by the incoming value, not on a standing timer,
-   * so a silent app costs nothing.
+   * It draws into one `<canvas>` from the shared meter clock (`lib/meterClock`):
+   * at most 30 paints a second, only while the level is moving, and none while
+   * the window is hidden. The earlier version restyled up to 48 elements per
+   * meter on every display frame, which kept the renderer and GPU busy.
+   *
+   * This is the one component allowed to be loud. On a monochrome chassis the
+   * meter is the only saturated thing in a row, which is exactly how an engineer
+   * finds the source that is actually making noise.
    */
-  import { onDestroy } from "svelte";
+  import { onMount } from "svelte";
   import { clampScalar, decayPeak, meterBand, nextHold } from "../lib/volume";
   import { reducedMotion } from "../lib/ux";
+  import { addMeter, wakeMeters } from "../lib/meterClock";
 
   let {
     peak = 0,
@@ -31,150 +38,169 @@
 
   const still = reducedMotion();
 
-  let displayed = $state(0);
-  let hold = $state({ value: 0, since: 0 });
-  let frame = 0;
-  let lastTick = 0;
+  let canvas = $state<HTMLCanvasElement>();
+  let displayed = 0;
+  let hold = { value: 0, since: 0 };
+  let lastPaint = 0;
+  let drawn = -1;
+  let drawnHold = -1;
+  let colours = { idle: "", low: "", mid: "", hot: "", hold: "" };
+  let labelValue = $state(0);
 
-  function tick(now: number): void {
-    const deltaMs = lastTick === 0 ? 16 : now - lastTick;
-    lastTick = now;
-
-    const target = clampScalar(peak);
-    const next = decayPeak(displayed, target, deltaMs);
-    displayed = next;
-    hold = nextHold(hold, next, now);
-
-    // Stop once the meter has settled at the incoming level; the next non-zero
-    // peak restarts the loop through the effect below.
-    if (next <= 0.002 && target <= 0.002) {
-      frame = 0;
-      lastTick = 0;
-      displayed = 0;
-      hold = { value: 0, since: now };
-      return;
-    }
-    frame = requestAnimationFrame(tick);
+  function readColours(): void {
+    if (!canvas) return;
+    const style = getComputedStyle(canvas);
+    colours = {
+      idle: style.getPropertyValue("--meter-idle").trim(),
+      low: style.getPropertyValue("--meter-low").trim(),
+      mid: style.getPropertyValue("--meter-mid").trim(),
+      hot: style.getPropertyValue("--meter-hot").trim(),
+      hold: style.getPropertyValue("--meter-hold").trim(),
+    };
+    drawn = -1;
   }
 
-  $effect(() => {
-    const incoming = clampScalar(peak);
-    if (still) {
-      displayed = incoming;
-      hold = { value: incoming, since: 0 };
-      return;
+  function draw(): void {
+    const el = canvas;
+    if (!el) return;
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(el.clientWidth * ratio));
+    const height = Math.max(1, Math.round(el.clientHeight * ratio));
+    if (el.width !== width || el.height !== height) {
+      el.width = width;
+      el.height = height;
+      drawn = -1;
     }
-    if (incoming > 0 && frame === 0) {
-      frame = requestAnimationFrame(tick);
-    }
-  });
+    const level = displayed;
+    const holdLevel = still ? 0 : hold.value;
+    if (level === drawn && holdLevel === drawnHold) return;
+    drawn = level;
+    drawnHold = holdLevel;
 
-  onDestroy(() => {
-    if (frame !== 0) cancelAnimationFrame(frame);
-  });
+    const ctx = el.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, width, height);
+    const vertical = orientation === "vertical";
+    const span = vertical ? height : width;
+    const gap = Math.max(1, Math.round(2 * ratio));
+    const segment = (span - gap * (bars - 1)) / bars;
+    const band = meterBand(level);
+    const fillColour = band === "hot" ? colours.hot : band === "mid" ? colours.mid : colours.low;
 
-  let band = $derived(meterBand(displayed));
-  let segments = $derived(
-    Array.from({ length: bars }, (_, index) => {
+    for (let index = 0; index < bars; index += 1) {
+      const start = index * (segment + gap);
       const threshold = (index + 1) / bars;
-      // Partial fill on the leading segment keeps a 5-bar meter from looking
-      // like a 5-step quantiser.
-      const filled = displayed >= threshold ? 1 : Math.max(0, (displayed - index / bars) * bars);
-      return { index, filled };
-    }),
-  );
+      // Partial fill on the leading segment keeps a coarse meter from reading
+      // like a stepped quantiser.
+      const filled = level >= threshold ? 1 : Math.max(0, (level - index / bars) * bars);
+      if (vertical) {
+        const y = height - start - segment;
+        ctx.fillStyle = colours.idle;
+        ctx.fillRect(0, y, width, segment);
+        if (filled > 0) {
+          ctx.fillStyle = fillColour;
+          ctx.fillRect(0, y + segment * (1 - filled), width, segment * filled);
+        }
+      } else {
+        ctx.fillStyle = colours.idle;
+        ctx.fillRect(start, 0, segment, height);
+        if (filled > 0) {
+          ctx.fillStyle = fillColour;
+          ctx.fillRect(start, 0, segment * filled, height);
+        }
+      }
+    }
+
+    if (holdLevel > 0.02) {
+      ctx.fillStyle = colours.hold;
+      const at = holdLevel * span;
+      if (vertical) ctx.fillRect(0, height - at, width, Math.max(1, ratio * 2));
+      else ctx.fillRect(Math.min(width - ratio * 2, at), 0, Math.max(1, ratio * 2), height);
+    }
+  }
+
+  /** One clock tick. Returns true while the meter still has motion to show. */
+  function paint(now: number): boolean {
+    const target = clampScalar(peak);
+    if (still) {
+      displayed = target;
+    } else {
+      const delta = lastPaint === 0 ? 33 : now - lastPaint;
+      displayed = decayPeak(displayed, target, delta);
+      hold = nextHold(hold, displayed, now);
+    }
+    lastPaint = now;
+    draw();
+    if (ariaLabel) labelValue = Math.round(displayed * 100);
+    const settled = displayed <= 0.002 && target <= 0.002 && hold.value <= 0.02;
+    if (settled) {
+      displayed = 0;
+      hold = { value: 0, since: now };
+      lastPaint = 0;
+      draw();
+    }
+    return !settled && !still;
+  }
+
+  onMount(() => {
+    readColours();
+    draw();
+    const stop = addMeter(paint);
+    // Theme changes swap the token values; re-read them instead of caching stale colours.
+    const observer = new MutationObserver(readColours);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    const resize = new ResizeObserver(() => {
+      drawn = -1;
+      draw();
+    });
+    if (canvas) resize.observe(canvas);
+    return () => {
+      stop();
+      observer.disconnect();
+      resize.disconnect();
+    };
+  });
+
+  // Each new reading wakes the shared clock; a silent meter costs nothing.
+  $effect(() => {
+    if (clampScalar(peak) > 0 || displayed > 0) wakeMeters();
+  });
 </script>
 
-<div
+<canvas
+  bind:this={canvas}
   class="meter"
   data-orientation={orientation}
-  data-band={band}
   role={ariaLabel ? "meter" : "presentation"}
   aria-label={ariaLabel}
-  aria-valuenow={ariaLabel ? Math.round(displayed * 100) : undefined}
+  aria-valuenow={ariaLabel ? labelValue : undefined}
   aria-valuemin={ariaLabel ? 0 : undefined}
   aria-valuemax={ariaLabel ? 100 : undefined}
->
-  {#each segments as segment (segment.index)}
-    <span class="meter-bar">
-      <span class="meter-bar-fill" style:--fill="{segment.filled * 100}%"></span>
-    </span>
-  {/each}
-  {#if !still && hold.value > 0.02}
-    <span class="meter-hold" style:--hold="{hold.value * 100}%" aria-hidden="true"></span>
-  {/if}
-</div>
+></canvas>
 
 <style>
+  /* The meter fills its container rather than claiming a fixed size, so the
+     console's alignment comes from one place. */
   .meter {
-    position: relative;
-    display: flex;
-    gap: 2px;
+    display: block;
     flex-shrink: 0;
   }
   .meter[data-orientation="horizontal"] {
-    width: 40px;
-    height: 16px;
-    align-items: flex-end;
+    width: 100%;
+    height: 20px;
   }
   .meter[data-orientation="vertical"] {
-    flex-direction: column-reverse;
-    width: 16px;
-    height: 48px;
-  }
-
-  .meter-bar {
-    position: relative;
-    flex: 1;
-    border-radius: 1px;
-    background: var(--meter-idle);
-    overflow: hidden;
-  }
-  .meter[data-orientation="horizontal"] .meter-bar {
+    width: 10px;
     height: 100%;
   }
 
-  .meter-bar-fill {
-    position: absolute;
-    inset: auto 0 0 0;
-    height: var(--fill);
-    background: var(--meter-color, var(--meter-low));
-    transition: height var(--dur-instant) linear;
-  }
-  .meter[data-orientation="vertical"] .meter-bar-fill {
-    inset: 0 0 auto 0;
-    height: auto;
-    width: var(--fill);
-  }
-
-  .meter[data-band="low"] {
-    --meter-color: var(--meter-low);
-  }
-  .meter[data-band="mid"] {
-    --meter-color: var(--meter-mid);
-  }
-  .meter[data-band="hot"] {
-    --meter-color: var(--meter-hot);
-  }
-
-  .meter-hold {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: var(--meter-hold);
-    transform: translateY(calc(-1 * var(--hold)));
-    pointer-events: none;
-  }
-
   @media (forced-colors: active) {
-    .meter-bar {
-      border: 1px solid CanvasText;
-    }
-    .meter-bar-fill {
-      background: Highlight;
+    .meter {
       forced-color-adjust: none;
+      outline: 1px solid CanvasText;
     }
   }
 </style>

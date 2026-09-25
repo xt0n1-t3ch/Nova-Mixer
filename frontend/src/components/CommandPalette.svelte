@@ -371,7 +371,7 @@
   }
   .item-group {
     font-size: var(--fs-2xs);
-    color: var(--text-placeholder);
+    color: var(--text-faint);
     text-transform: uppercase;
     letter-spacing: var(--letter-wide);
     max-width: 90px;
@@ -391,7 +391,7 @@
     padding: var(--space-2) var(--space-4);
     border-top: 1px solid var(--border);
     font-size: var(--fs-2xs);
-    color: var(--text-placeholder);
+    color: var(--text-faint);
     flex-shrink: 0;
   }
   .palette-foot span {

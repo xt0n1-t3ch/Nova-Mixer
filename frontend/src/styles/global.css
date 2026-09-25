@@ -5,129 +5,155 @@
 @import "@fontsource-variable/jetbrains-mono/wght.css";
 
 /* ── NovaMixer design system ────────────────────────────────────────────────
-   Every colour, size, radius, duration and easing in the app resolves to a token
-   declared here. Components extend these primitives with modifiers; they must
-   never redeclare a token locally, or light mode and density silently break. */
+   Every colour, size, radius, duration and easing in the app resolves to a
+   token declared here. Components extend these primitives with modifiers; they
+   must never redeclare a token locally, or light mode and density silently
+   break.
+
+   The governing rule of this system: THE CHASSIS IS MONOCHROME, COLOUR MEANS
+   SIGNAL. On a real mixing console the only coloured things are the meters and
+   the status lamps, because colour is how an engineer reads level and state at
+   a glance. An earlier version tinted the entire chassis indigo — faders,
+   badges, brand, focus rings and three full-window ambient gradients — which
+   left nothing for signal to contrast against and read as decoration rather
+   than instrumentation.
+
+   So: greys are neutral (R=G=B, no blue cast), the accent is ink — near-white
+   on dark, near-black on light — and saturated colour is reserved for meters,
+   the live lamp, mute and destructive actions.
+
+   Every text and UI token below is verified against WCAG 2.2 AA on its own
+   surface: 4.5:1 for text, 3:1 for interface boundaries and meter segments. */
 
 :root {
   color-scheme: dark;
 
-  /* Surfaces ------------------------------------------------------------- */
-  --bg-base: #000000;
-  --bg-app: #000000;
-  --bg-sidebar: #000000;
-  --bg-topbar: rgba(0, 0, 0, 0.72);
-  --bg-card: #0b0b0d;
-  --bg-card-hover: #151518;
-  --bg-elevated: #111114;
-  --bg-elevated-2: #16161a;
-  --bg-input: #050506;
-  --bg-overlay: rgba(0, 0, 0, 0.92);
-  --bg-cap: rgba(244, 246, 249, 0.04);
+  /* Surfaces — neutral greys, no hue -------------------------------------
+     A five-step ladder. Each step is a real elevation the eye can order, which
+     is what lets a card, a popover and an input read as different planes
+     without a single border. */
+  --bg-base: #0a0a0a;
+  --bg-app: #0a0a0a;
+  --bg-sidebar: #0d0d0d;
+  --bg-topbar: rgba(13, 13, 13, 0.88);
+  --bg-card: #141414;
+  --bg-card-hover: #1c1c1c;
+  --bg-elevated: #1a1a1a;
+  --bg-elevated-2: #242424;
+  --bg-input: #101010;
+  --bg-overlay: rgba(8, 8, 8, 0.94);
+  --bg-sunken: rgba(255, 255, 255, 0.035);
 
-  /* Text ----------------------------------------------------------------- */
-  --text-primary: #ffffff;
-  --text-secondary: #c7c7cc;
-  --text-muted: #86868b;
-  --text-placeholder: #48484a;
+  /* Text — four weights, all AA on both --bg-app and --bg-card ------------
+     `--text-faint` is the floor: 5.73:1 on the app surface. Nothing renders
+     text below this token, which is what stopped column legends and secondary
+     rows from disappearing in the previous system. */
+  --text-primary: #fafafa;
+  --text-secondary: #c4c4c4;
+  --text-muted: #a1a1a1;
+  --text-faint: #8a8a8a;
 
-  /* Accent — monochrome metal, the sibling app's visual language ---------- */
-  --accent: #e9ebef;
+  /* Accent — ink. Dark mode's accent is near-white for the same reason light
+     mode's is near-black: the accent marks "this is the selected/active
+     control", and on a monochrome chassis that is a value contrast, not a hue.
+     Kept as a token rather than inlined so a future brand colour is one edit. */
+  --accent: #fafafa;
   --accent-hover: #ffffff;
-  --accent-strong: #c2c6cd;
-  --accent-glow: rgba(233, 235, 239, 0.16);
-  --accent-dim: rgba(233, 235, 239, 0.1);
-  --accent-fg: #0b0c0e;
-  --accent-soft: rgba(233, 235, 239, 0.05);
-  --accent-ring: rgba(233, 235, 239, 0.42);
-  --accent-metal: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--accent) 84%, #fff),
-    var(--accent) 56%,
-    var(--accent-strong)
-  );
-  --accent-metal-hover: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--accent-hover) 80%, #fff),
-    var(--accent-hover) 58%,
-    var(--accent)
-  );
-  --accent-edge: color-mix(in oklab, var(--accent) 62%, #000);
+  --accent-strong: #ffffff;
+  --accent-soft: rgba(250, 250, 250, 0.08);
+  --accent-dim: rgba(250, 250, 250, 0.12);
+  --accent-ring: rgba(250, 250, 250, 0.55);
+  --accent-fg: #0a0a0a;
 
-  /* Status --------------------------------------------------------------- */
-  --success: #34d399;
-  --success-glow: rgba(52, 211, 153, 0.2);
-  --success-dim: rgba(52, 211, 153, 0.08);
-  --warning: #f5b950;
-  --warning-glow: rgba(245, 185, 80, 0.2);
-  --warning-dim: rgba(245, 185, 80, 0.08);
-  --danger: #ef4444;
-  --danger-glow: rgba(239, 68, 68, 0.2);
-  --danger-dim: rgba(239, 68, 68, 0.08);
-  --info: #62a8ff;
-  --info-glow: rgba(98, 168, 255, 0.3);
-  --info-dim: rgba(98, 168, 255, 0.14);
-  --neutral: #475063;
-  --neutral-dim: rgba(71, 80, 99, 0.18);
+  /* Status — the signal palette. These are the only saturated colours in the
+     chassis, and each one is AA on the app surface. */
+  --success: #4ade80;
+  --success-dim: rgba(74, 222, 128, 0.14);
+  --warning: #fbbf24;
+  --warning-dim: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-dim: rgba(248, 113, 113, 0.14);
+  /* Ink for a glyph sitting ON a solid --danger fill. It is not --accent-fg:
+     on a light red fill white gives 2.77:1 and disappears, while near-black
+     gives 7.16:1. A filled destructive control needs its own foreground token
+     or the glyph silently vanishes in one theme. */
+  --danger-on: #1a0606;
+  --info: #7dd3fc;
+  --info-dim: rgba(125, 211, 252, 0.14);
+  --neutral: #a1a1a1;
+  --neutral-dim: rgba(161, 161, 161, 0.14);
 
-  /* Badges --------------------------------------------------------------- */
-  --badge-blue-bg: rgba(10, 132, 255, 0.16);
-  --badge-blue-fg: #0a84ff;
-  --badge-green-bg: rgba(48, 209, 88, 0.16);
-  --badge-green-fg: #30d158;
-  --badge-orange-bg: rgba(255, 159, 10, 0.16);
-  --badge-orange-fg: #ff9f0a;
-  --badge-red-bg: rgba(255, 69, 58, 0.16);
-  --badge-red-fg: #ff453a;
-  --badge-purple-bg: rgba(191, 90, 242, 0.16);
-  --badge-purple-fg: #bf5af2;
-  --badge-teal-bg: rgba(100, 210, 255, 0.16);
-  --badge-teal-fg: #64d2ff;
 
-  /* Mixer-specific ------------------------------------------------------- */
-  /* The meter reads cool while headroom is comfortable and warms as the signal
-     approaches clipping, so level is legible without reading a number. */
-  --meter-low: #4bd4a4;
-  --meter-mid: #f5b950;
-  --meter-hot: #ff5a60;
-  --meter-idle: rgba(255, 255, 255, 0.1);
-  --meter-hold: rgba(255, 255, 255, 0.55);
+  /* Meters — the loudest thing on screen, by design. Green/amber/red is the
+     one convention every audio interface shares, so it is not reinterpreted
+     here. Each segment clears 3:1 against the app surface. */
+  --meter-low: #22c55e;
+  --meter-mid: #f59e0b;
+  --meter-hot: #ef4444;
+  --meter-idle: rgba(255, 255, 255, 0.14);
+  --meter-hold: rgba(255, 255, 255, 0.75);
 
-  --slider-track: rgba(255, 255, 255, 0.11);
-  --slider-track-hover: rgba(255, 255, 255, 0.16);
+  /* Faders — the track must stay visible at 100%, or a full row stops reading
+     as a slider and becomes an anonymous filled bar. */
+  --slider-track: rgba(255, 255, 255, 0.16);
+  --slider-track-hover: rgba(255, 255, 255, 0.24);
   --slider-fill: var(--accent);
-  --slider-fill-muted: var(--text-placeholder);
+  --slider-fill-muted: #6b6b6b;
   --slider-thumb: #ffffff;
   --slider-thumb-ring: rgba(0, 0, 0, 0.55);
-  --slider-height: 4px;
-  --slider-height-hover: 6px;
+  --slider-height: 6px;
+  --slider-height-hover: 8px;
   --slider-thumb-size: 14px;
   --slider-thumb-size-hover: 18px;
-  --slider-hit-area: 24px;
+  --slider-hit-area: 28px;
 
-  --row-height-comfy: 68px;
-  --row-height-compact: 48px;
-  --row-icon-comfy: 38px;
-  --row-icon-compact: 28px;
+  /* Hardware fader -------------------------------------------------------
+     A channel fader is a cap riding in a slot milled into the panel. The slot
+     is darker than its surroundings with a light lower lip; the cap is a light
+     grip with a drop shadow. Those two shadows are the whole illusion, and this
+     is the only place the interface simulates a physical object — a mixer is
+     the one tool whose users already know the hardware it descends from. */
+  --fader-cap-width: 26px;
+  --fader-cap-height: 13px;
+  --fader-cap: #d4d4d4;
+  --fader-cap-hover: #ffffff;
+  --fader-cap-shadow: 0 1px 2px rgba(0, 0, 0, 0.8), 0 2px 5px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+  --fader-cap-shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.85), 0 3px 8px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+  --fader-slot-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.06);
 
-  /* Borders and rings ---------------------------------------------------- */
-  --border: rgba(255, 255, 255, 0.075);
-  --border-strong: rgba(255, 255, 255, 0.2);
-  --border-hover: rgba(255, 255, 255, 0.14);
+  /* Channel rows ---------------------------------------------------------
+     One row per application. A row costs 48px, so a normal window shows every
+     source at once, and every row shares one grid so all faders, readouts and
+     mute buttons stand in the same columns. */
+  --row-height-comfy: 48px;
+  --row-height-compact: 36px;
+  --row-icon-comfy: 28px;
+  --row-icon-compact: 22px;
+
+  /* identity | fader over meter | readout | mute | row actions */
+  --grid-channel: minmax(170px, 0.9fr) minmax(180px, 2.4fr) 44px 34px 62px;
+
+  /* Borders — 0.14 alpha on black clears the 3:1 non-text minimum, which the
+     previous 0.085 did not. A border a user cannot see is not a border. */
+  --border: rgba(255, 255, 255, 0.14);
+  --border-hover: rgba(255, 255, 255, 0.22);
+  --border-strong: rgba(255, 255, 255, 0.3);
   --border-focus: var(--accent);
-  --card-edge: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --card-edge: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   /* Radii ---------------------------------------------------------------- */
   --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius-md: 9px;
+  --radius-md: 8px;
   --radius-lg: 12px;
-  --radius-xl: 15px;
-  --radius-2xl: 18px;
-  --radius-3xl: 22px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
   --radius-full: 9999px;
 
-  /* Spacing -------------------------------------------------------------- */
+  /* Spacing — strict 4px scale ------------------------------------------- */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -137,25 +163,26 @@
   --space-7: 48px;
   --space-8: 64px;
 
-  /* Shadows -------------------------------------------------------------- */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 3px 8px -3px rgba(0, 0, 0, 0.55);
-  --shadow-md: 0 2px 6px -2px rgba(0, 0, 0, 0.5), 0 10px 24px -8px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 6px 16px -6px rgba(0, 0, 0, 0.55), 0 28px 56px -16px rgba(0, 0, 0, 0.72);
-  --shadow-card-hover: 0 10px 28px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--border-strong);
-  --shadow-ring: 0 0 0 3px var(--accent-ring);
-  --shadow-halo: 0 0 0 1px var(--accent), 0 0 20px var(--accent-glow), 0 0 44px var(--accent-dim);
+  /* Shadows — on a dark chassis a shadow is nearly invisible, so elevation is
+     carried mostly by the surface ladder above. These stay subtle on purpose;
+     light mode redefines them as the real elevation signal. */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 6px -2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 2px 8px -2px rgba(0, 0, 0, 0.6), 0 12px 24px -8px rgba(0, 0, 0, 0.7);
+  --shadow-lg: 0 8px 20px -6px rgba(0, 0, 0, 0.7), 0 32px 60px -20px rgba(0, 0, 0, 0.8);
+  --shadow-card-hover: 0 6px 18px -8px rgba(0, 0, 0, 0.7);
+  --shadow-ring: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--accent-ring);
 
   /* Type ----------------------------------------------------------------- */
   --fs-2xs: 10px;
-  --fs-xs: 11px;
+  --fs-xs: 11.5px;
   --fs-sm: 12.5px;
   --fs-base: 13.5px;
-  --fs-md: 14.5px;
-  --fs-lg: 16px;
-  --fs-xl: 20px;
-  --fs-2xl: 26px;
-  --fs-3xl: 32px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 21px;
+  --fs-2xl: 27px;
+  --fs-3xl: 34px;
   --fs-display: 44px;
 
   --lh-tight: 1.15;
@@ -163,9 +190,9 @@
   --lh-normal: 1.55;
 
   --letter-tight: -0.01em;
-  --letter-tighter: -0.02em;
+  --letter-tighter: -0.022em;
   --letter-wide: 0.02em;
-  --letter-wider: 0.08em;
+  --letter-wider: 0.07em;
 
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
@@ -175,51 +202,47 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
-  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 
   --dur-instant: 80ms;
-  --dur-fast: 140ms;
-  --dur-normal: 220ms;
-  --dur-slow: 360ms;
+  --dur-fast: 130ms;
+  --dur-normal: 200ms;
+  --dur-slow: 320ms;
   --dur-stagger: 12ms;
 
   /* Shell ----------------------------------------------------------------
      A mixing console, not a documents app: a narrow instrument rail instead of
-     a wide navigation sidebar, a thin chrome strip instead of a toolbar, and a
-     master deck that spans the desk rather than sitting in a card. */
-  --rail-width: 64px;
-  --rail-width-expanded: 208px;
+     a wide navigation sidebar, and one fused output header instead of a title
+     bar stacked on top of a separate master card. */
   --chrome-height: 44px;
-  --master-deck-height: 184px;
-  --scene-belt-height: 44px;
   --inspector-width: 320px;
   --inspector-overlay-width: 360px;
-  --content-max: 1600px;
+  --content-max: 1400px;
+  --page-gutter-x: clamp(16px, 2.2vw, 32px);
+  --page-gutter-y: clamp(16px, 2vw, 24px);
+  --side-panel-width: 280px;
 
-  /* Console surfaces: the deck reads as one continuous instrument, so its
-     divisions are ruled lines rather than gaps between floating cards. */
-  --deck-bg: #08080a;
-  --deck-line: rgba(255, 255, 255, 0.06);
-  --deck-line-strong: rgba(255, 255, 255, 0.12);
-  --channel-hover: rgba(255, 255, 255, 0.028);
-  --channel-selected: rgba(233, 235, 239, 0.06);
+  /* Console surfaces ----------------------------------------------------- */
+  --deck-bg: #0f0f0f;
+  --deck-line: rgba(255, 255, 255, 0.09);
+  --deck-line-strong: rgba(255, 255, 255, 0.16);
+  --channel-hover: rgba(255, 255, 255, 0.045);
+  --channel-selected: rgba(255, 255, 255, 0.08);
 
-  /* Glass — reserved for floating chrome, never for content cards --------- */
-  --glass-1: rgba(10, 11, 14, 0.5);
-  --glass-2: rgba(7, 8, 10, 0.45);
-  --glass-3: rgba(6, 7, 9, 0.6);
-  --glass-strong: rgba(9, 10, 13, 0.66);
-  --glass-blur: blur(26px) saturate(135%) brightness(1.03);
-  --glass-blur-bar: blur(20px) saturate(135%) brightness(1.03);
-  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+  /* Floating chrome ------------------------------------------------------
+     Blur alone is not a material. These pair a translucent neutral with a
+     top highlight, so a dialog reads as glass over the desk rather than as a
+     washed-out rectangle. */
+  --glass-1: rgba(18, 18, 18, 0.72);
+  --glass-2: rgba(14, 14, 14, 0.78);
+  --glass-3: rgba(10, 10, 10, 0.82);
+  --glass-strong: rgba(20, 20, 20, 0.94);
+  --glass-blur: blur(24px) saturate(120%);
+  --glass-blur-bar: blur(18px) saturate(120%);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   --glass-fallback: var(--bg-elevated);
 
-  --ambient-glow-1: hsla(220, 8%, 62%, 0.06);
-  --ambient-glow-2: hsla(220, 6%, 50%, 0.04);
-  --ambient-glow-3: hsla(220, 6%, 42%, 0.05);
-  --noise-url: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.035 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-
-  --scrollbar-thumb: rgba(255, 255, 255, 0.22);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
 
   font-family: var(--font-sans);
@@ -231,107 +254,116 @@
 }
 
 /* ── Light theme ───────────────────────────────────────────────────────────
-   Dark is additive: a glow sits on top of black. Light is subtractive: the same
-   glow reads as dirt on white, so every luminous cue collapses into a crisp
-   ring plus a downward shadow, which is the light-native elevation signal. */
+   Dark is additive: elevation is a lighter surface. Light is subtractive: the
+   same lift reads as dirt on white, so elevation becomes a crisp hairline plus
+   a downward shadow, which is the light-native signal.
+
+   Every text token here is re-derived rather than reused. The previous system
+   inherited `#86868b` (3.62:1) and `#aeaeb2` (2.21:1) into light mode, which is
+   why secondary rows and column legends were unreadable on white. */
 [data-theme="light"] {
   color-scheme: light;
 
   --bg-base: #ffffff;
   --bg-app: #ffffff;
-  --bg-sidebar: #ffffff;
-  --bg-topbar: rgba(255, 255, 255, 0.72);
+  --bg-sidebar: #fbfbfb;
+  --bg-topbar: rgba(255, 255, 255, 0.88);
   --bg-card: #ffffff;
-  --bg-card-hover: #f5f6f8;
-  --bg-elevated: #f1f2f5;
-  --bg-elevated-2: #eef0f4;
+  --bg-card-hover: #f6f6f7;
+  --bg-elevated: #f2f2f3;
+  --bg-elevated-2: #e8e8ea;
   --bg-input: #ffffff;
   --bg-overlay: rgba(255, 255, 255, 0.94);
-  --bg-cap: rgba(15, 23, 42, 0.04);
+  --bg-sunken: rgba(0, 0, 0, 0.025);
 
-  --text-primary: #000000;
-  --text-secondary: #2b2b2e;
-  --text-muted: #86868b;
-  --text-placeholder: #aeaeb2;
+  --text-primary: #0b0b0c;
+  --text-secondary: #3d3d40;
+  --text-muted: #5c5c60;
+  --text-faint: #6e6e73;
 
-  --accent: #1b1d22;
-  --accent-hover: #34373e;
-  --accent-strong: #0b0c0f;
-  --accent-glow: rgba(20, 22, 28, 0.14);
-  --accent-dim: rgba(20, 22, 28, 0.06);
+  --accent: #18181b;
+  --accent-hover: #000000;
+  --accent-strong: #000000;
+  --accent-soft: rgba(24, 24, 27, 0.05);
+  --accent-dim: rgba(24, 24, 27, 0.09);
+  --accent-ring: rgba(24, 24, 27, 0.5);
   --accent-fg: #ffffff;
-  --accent-soft: rgba(20, 22, 28, 0.04);
-  --accent-ring: rgba(20, 22, 28, 0.3);
 
-  --success: #16a34a;
-  --success-dim: rgba(22, 163, 74, 0.08);
-  --success-glow: rgba(22, 163, 74, 0.18);
-  --warning: #c97a14;
-  --warning-dim: rgba(201, 122, 20, 0.1);
-  --warning-glow: rgba(201, 122, 20, 0.2);
-  --danger: #dc2626;
-  --danger-dim: rgba(220, 38, 38, 0.08);
-  --danger-glow: rgba(220, 38, 38, 0.18);
-  --info: #1d4ed8;
-  --info-dim: rgba(37, 99, 235, 0.1);
-  --info-glow: rgba(37, 99, 235, 0.22);
-  --neutral: #64748b;
-  --neutral-dim: rgba(100, 116, 139, 0.12);
+  /* Saturated colour has to darken on white to stay AA, so the signal palette
+     is a different set of values expressing the same three meanings. */
+  --success: #15803d;
+  --success-dim: rgba(21, 128, 61, 0.1);
+  --warning: #a16207;
+  --warning-dim: rgba(161, 98, 7, 0.1);
+  --danger: #b91c1c;
+  --danger-dim: rgba(185, 28, 28, 0.09);
+  /* Light mode's --danger is dark enough that white is the readable glyph
+     (6.47:1), which is the opposite choice from dark mode. */
+  --danger-on: #ffffff;
+  --info: #0369a1;
+  --info-dim: rgba(3, 105, 161, 0.1);
+  --neutral: #5c5c60;
+  --neutral-dim: rgba(92, 92, 96, 0.1);
 
-  --badge-blue-bg: #e3f0ff;
-  --badge-blue-fg: #007aff;
-  --badge-green-bg: #dcfce7;
-  --badge-green-fg: #16a34a;
-  --badge-orange-bg: #fed7aa;
-  --badge-orange-fg: #d97706;
-  --badge-red-bg: #fecaca;
-  --badge-red-fg: #dc2626;
-  --badge-purple-bg: #e9d5ff;
-  --badge-purple-fg: #9333ea;
-  --badge-teal-bg: #ccfbf1;
-  --badge-teal-fg: #0d9488;
 
-  --meter-low: #0f9d70;
-  --meter-mid: #b8760f;
-  --meter-hot: #d92d36;
-  --meter-idle: rgba(15, 23, 42, 0.08);
-  --meter-hold: rgba(15, 23, 42, 0.45);
+  /* The ramp must mean the same thing in both themes. `#b45309` cleared
+     contrast but reads as rust, so a mid-level meter looked like a different
+     state rather than the same amber seen on white. `#d97706` is recognisably
+     amber and still clears the 3:1 non-text minimum at 3.19:1. */
+  --meter-low: #16a34a;
+  --meter-mid: #d97706;
+  --meter-hot: #dc2626;
+  /* The idle meter segment must read as an empty socket, not as blank paper.
+     At 0.08 alpha it was invisible; 0.16 is the floor where the meter's shape
+     survives when nothing is playing. */
+  --meter-idle: rgba(0, 0, 0, 0.16);
+  --meter-hold: rgba(0, 0, 0, 0.5);
 
-  --slider-track: rgba(15, 23, 42, 0.12);
-  --slider-track-hover: rgba(15, 23, 42, 0.18);
+  --slider-track: rgba(0, 0, 0, 0.16);
+  --slider-track-hover: rgba(0, 0, 0, 0.24);
+  --slider-fill-muted: #a1a1a6;
   --slider-thumb: #ffffff;
-  --slider-thumb-ring: rgba(15, 23, 42, 0.28);
+  --slider-thumb-ring: rgba(0, 0, 0, 0.32);
 
-  --border: rgba(0, 0, 0, 0.11);
-  --border-strong: rgba(0, 0, 0, 0.22);
-  --border-hover: rgba(0, 0, 0, 0.16);
+  --border: rgba(0, 0, 0, 0.14);
+  --border-hover: rgba(0, 0, 0, 0.22);
+  --border-strong: rgba(0, 0, 0, 0.3);
   --card-edge: none;
 
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 2px 6px -2px rgba(15, 23, 42, 0.08);
-  --shadow-md: 0 2px 6px -2px rgba(15, 23, 42, 0.06), 0 10px 24px -8px rgba(15, 23, 42, 0.1);
-  --shadow-lg: 0 6px 16px -6px rgba(15, 23, 42, 0.08), 0 24px 48px -16px rgba(15, 23, 42, 0.14);
-  --shadow-card-hover: 0 8px 22px -10px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.1);
-  --shadow-halo: 0 0 0 1px var(--accent), 0 2px 10px var(--accent-glow);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 6px -2px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 2px 6px -2px rgba(0, 0, 0, 0.07), 0 10px 24px -8px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 6px 16px -6px rgba(0, 0, 0, 0.1), 0 24px 48px -16px rgba(0, 0, 0, 0.14);
+  --shadow-card-hover: 0 4px 14px -6px rgba(0, 0, 0, 0.14);
+  --shadow-ring: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--accent-ring);
 
-  --glass-1: rgba(255, 255, 255, 0.55);
-  --glass-2: rgba(255, 255, 255, 0.48);
-  --glass-3: rgba(255, 255, 255, 0.66);
-  --glass-strong: rgba(252, 253, 255, 0.95);
-  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --glass-1: rgba(255, 255, 255, 0.78);
+  --glass-2: rgba(255, 255, 255, 0.82);
+  --glass-3: rgba(255, 255, 255, 0.86);
+  --glass-strong: rgba(255, 255, 255, 0.97);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 
-  --ambient-glow-1: hsla(220, 14%, 60%, 0.035);
-  --ambient-glow-2: hsla(220, 10%, 52%, 0.022);
-  --ambient-glow-3: hsla(220, 8%, 46%, 0.025);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
 
-  --scrollbar-thumb: rgba(0, 0, 0, 0.16);
-  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.26);
+  --deck-bg: #f4f4f5;
+  --deck-line: rgba(0, 0, 0, 0.09);
+  --deck-line-strong: rgba(0, 0, 0, 0.16);
+  --channel-hover: rgba(0, 0, 0, 0.03);
+  --channel-selected: rgba(0, 0, 0, 0.055);
 
-  --deck-bg: #fbfbfd;
-  --deck-line: rgba(15, 23, 42, 0.08);
-  --deck-line-strong: rgba(15, 23, 42, 0.16);
-  --channel-hover: rgba(15, 23, 42, 0.03);
-  --channel-selected: rgba(20, 22, 28, 0.05);
+  /* The hardware illusion is re-lit rather than reused. A hard black inset on
+     white reads as dirt, and a near-white cap disappears into the panel, so the
+     slot becomes a soft recess and the cap becomes dark ink with a light top
+     bevel — the same object under different lighting. */
+  --fader-cap: #2a2a2e;
+  --fader-cap-hover: #101012;
+  --fader-cap-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 5px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+  --fader-cap-shadow-hover: 0 1px 3px rgba(0, 0, 0, 0.34), 0 3px 8px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 -1px 0 rgba(0, 0, 0, 0.34);
+  --fader-slot-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18), 0 1px 0 rgba(255, 255, 255, 0.9);
+
 }
 
 /* ── Density ───────────────────────────────────────────────────────────────
@@ -365,36 +397,19 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-  background: transparent;
-}
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border: 4px solid transparent;
-  background-clip: padding-box;
-  border-radius: var(--radius-full);
-  transition: background-color var(--dur-fast) var(--ease);
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-  background-clip: padding-box;
-}
-@supports not selector(::-webkit-scrollbar) {
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
-  }
+/* Native scrollbars. The standard properties keep the platform's own
+   scrollbar — its overlay behaviour, arrow-free thin form, hit area and
+   accessibility — and only tint it to the theme. `color-scheme` above already
+   tells the engine which native palette to use. Hand-painted
+   `::-webkit-scrollbar` rules are deliberately absent: they replace the native
+   control with a fixed-width fake. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 @media (forced-colors: active) {
-  ::-webkit-scrollbar-thumb {
-    background: CanvasText;
-    border-color: Canvas;
+  * {
+    scrollbar-color: auto;
   }
 }
 
@@ -406,14 +421,30 @@ button {
   color: inherit;
 }
 
+/* One focus ring for the whole app. The inner spread is painted in the app
+   background so the ring reads on a card, an input and a toolbar alike without
+   each surface needing its own rule. */
 button:focus-visible,
 select:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-[role="button"]:focus-visible {
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
   outline: none;
-  border-color: var(--border-focus);
   box-shadow: var(--shadow-ring);
+  border-radius: var(--radius-sm);
+}
+
+@media (forced-colors: active) {
+  button:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
 }
 
 input[type="text"],
@@ -426,7 +457,7 @@ textarea {
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 9px 14px;
+  padding: 9px 13px;
   outline: none;
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
   font-variant-numeric: tabular-nums;
@@ -434,7 +465,7 @@ textarea {
 }
 input::placeholder,
 textarea::placeholder {
-  color: var(--text-placeholder);
+  color: var(--text-faint);
 }
 
 .sr-only {
@@ -479,15 +510,27 @@ textarea::placeholder {
   color: var(--danger);
 }
 
+/* An uppercase micro-label. Used for every column legend, section head and
+   band title, so those never fall back to an ad-hoc font-size/letter-spacing
+   pair per component. */
+.overline {
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-wider);
+  color: var(--text-faint);
+  line-height: 1.2;
+}
+
 /* ── Buttons ───────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
   font-size: var(--fs-sm);
-  font-weight: 500;
-  padding: 9px 16px;
+  font-weight: 550;
+  padding: 8px 14px;
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
   color: var(--text-primary);
@@ -498,7 +541,7 @@ textarea::placeholder {
   font-variant-numeric: tabular-nums;
 }
 .btn:hover:not(:disabled) {
-  background: var(--bg-card-hover);
+  background: var(--bg-elevated-2);
   border-color: var(--border-hover);
 }
 .btn:active:not(:disabled) {
@@ -513,25 +556,25 @@ textarea::placeholder {
   background: var(--bg-elevated);
   color: var(--text-primary);
 }
+/* The primary action is solid ink: maximum value contrast, no gradient, no
+   glow. On a monochrome chassis that is the strongest possible emphasis. */
 .btn.btn-primary {
-  background: var(--accent-metal);
+  background: var(--accent);
   color: var(--accent-fg);
-  border-color: var(--accent-edge);
+  border-color: transparent;
   font-weight: 600;
-  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 .btn.btn-primary:hover:not(:disabled) {
-  background: var(--accent-metal-hover);
-  border-color: var(--accent-edge);
-  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  background: var(--accent-hover);
+  border-color: transparent;
 }
 .btn.btn-accent {
   background: var(--accent-dim);
-  color: var(--accent);
+  color: var(--text-primary);
   border-color: transparent;
 }
 .btn.btn-accent:hover:not(:disabled) {
-  background: var(--accent-glow);
+  background: var(--accent-soft);
 }
 .btn.btn-danger {
   background: var(--danger-dim);
@@ -539,7 +582,8 @@ textarea::placeholder {
   border-color: transparent;
 }
 .btn.btn-danger:hover:not(:disabled) {
-  background: var(--danger-glow);
+  background: var(--danger-dim);
+  border-color: var(--danger);
 }
 .btn.btn-danger-ghost {
   background: transparent;
@@ -552,14 +596,15 @@ textarea::placeholder {
 }
 .btn.btn-sm {
   font-size: var(--fs-xs);
-  padding: 6px 10px;
+  padding: 5px 10px;
 }
 .btn:disabled {
-  opacity: 0.4;
+  opacity: 0.42;
   cursor: not-allowed;
 }
 
-/* Square icon button: the unit of every row-level and chrome-level action. */
+/* Square icon button: the unit of every row-level and chrome-level action.
+   32px is the pointer target floor; the drawn glyph may be smaller. */
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -576,24 +621,21 @@ textarea::placeholder {
   background: var(--bg-elevated);
   color: var(--text-primary);
 }
-.icon-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-ring);
-}
 .icon-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
 .icon-btn.is-on {
-  color: var(--accent);
+  color: var(--text-primary);
   background: var(--accent-dim);
 }
 .icon-btn.is-danger {
   color: var(--danger);
 }
 .icon-btn.icon-btn-sm {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
 }
 
 /* ── Chips ─────────────────────────────────────────────────────────────── */
@@ -602,20 +644,20 @@ textarea::placeholder {
   align-items: center;
   gap: 5px;
   font-size: var(--fs-2xs);
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: var(--letter-wide);
-  padding: 4px 10px;
+  padding: 3px 9px;
   border-radius: var(--radius-full);
   background: var(--bg-elevated);
   color: var(--text-secondary);
   border: 1px solid var(--border);
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
+  line-height: 1.3;
 }
 .chip.chip-accent {
   background: var(--accent-dim);
-  color: var(--accent);
+  color: var(--text-primary);
   border-color: transparent;
 }
 .chip.chip-success {
@@ -643,30 +685,7 @@ textarea::placeholder {
   height: 6px;
   border-radius: 50%;
   background: currentColor;
-}
-
-[data-theme="light"] .chip {
-  background: #ffffff;
-}
-[data-theme="light"] .chip.chip-accent {
-  background: rgba(20, 22, 28, 0.06);
-  color: #1b1d22;
-  border-color: rgba(20, 22, 28, 0.18);
-}
-[data-theme="light"] .chip.chip-success {
-  background: rgba(22, 163, 74, 0.1);
-  color: #15803d;
-  border-color: rgba(22, 163, 74, 0.3);
-}
-[data-theme="light"] .chip.chip-warning {
-  background: rgba(201, 122, 20, 0.12);
-  color: #854d0e;
-  border-color: rgba(201, 122, 20, 0.35);
-}
-[data-theme="light"] .chip.chip-danger {
-  background: rgba(220, 38, 38, 0.1);
-  color: #b91c1c;
-  border-color: rgba(220, 38, 38, 0.3);
+  flex-shrink: 0;
 }
 
 /* ── Surfaces ──────────────────────────────────────────────────────────── */
@@ -674,7 +693,7 @@ textarea::placeholder {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px;
+  padding: var(--space-5);
   min-width: 0;
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
@@ -682,28 +701,32 @@ textarea::placeholder {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 18px 20px;
+  padding: var(--space-4) var(--space-5);
   box-shadow: var(--card-edge);
+  min-width: 0;
 }
 .aura-card {
   background: var(--bg-card);
-  border-radius: var(--radius-2xl);
-  padding: 22px 24px;
+  border-radius: var(--radius-xl);
+  padding: var(--space-5);
   border: 1px solid var(--border);
   transition: box-shadow var(--dur-normal) var(--ease), border-color var(--dur-normal) var(--ease);
 }
 .aura-card:hover {
-  box-shadow: var(--shadow-md), var(--card-edge);
+  box-shadow: var(--shadow-md);
 }
 .aura-card.aura-card-xl {
-  border-radius: var(--radius-3xl);
-  padding: 28px 32px;
+  border-radius: var(--radius-2xl);
+  padding: var(--space-6);
 }
 
+/* Always neutral. A per-application colour variant used to live here, chosen by
+   hashing the app key, but a saturated tile sits in the same row as a level
+   meter and in this interface colour in a channel means signal. */
 .aura-badge {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -712,42 +735,12 @@ textarea::placeholder {
   color: var(--text-secondary);
   border: 1px solid var(--border);
 }
-.aura-badge[data-tint="blue"] {
-  background: var(--badge-blue-bg);
-  color: var(--badge-blue-fg);
-  border-color: transparent;
-}
-.aura-badge[data-tint="green"] {
-  background: var(--badge-green-bg);
-  color: var(--badge-green-fg);
-  border-color: transparent;
-}
-.aura-badge[data-tint="orange"] {
-  background: var(--badge-orange-bg);
-  color: var(--badge-orange-fg);
-  border-color: transparent;
-}
-.aura-badge[data-tint="red"] {
-  background: var(--badge-red-bg);
-  color: var(--badge-red-fg);
-  border-color: transparent;
-}
-.aura-badge[data-tint="purple"] {
-  background: var(--badge-purple-bg);
-  color: var(--badge-purple-fg);
-  border-color: transparent;
-}
-.aura-badge[data-tint="teal"] {
-  background: var(--badge-teal-bg);
-  color: var(--badge-teal-fg);
-  border-color: transparent;
-}
 
 .divider {
   height: 1px;
   background: var(--border);
   border: none;
-  margin: 16px 0;
+  margin: var(--space-4) 0;
 }
 
 /* ── Glass — floating chrome only ──────────────────────────────────────── */
@@ -760,7 +753,7 @@ textarea::placeholder {
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass-panel {
-    background: var(--bg-elevated);
+    background: var(--glass-fallback);
   }
 }
 
@@ -775,19 +768,6 @@ textarea::placeholder {
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg), var(--glass-edge);
-}
-.glass-dialog::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: linear-gradient(
-    to bottom,
-    var(--edge-color, var(--accent)),
-    color-mix(in oklab, var(--edge-color, var(--accent)) 30%, transparent)
-  );
-  pointer-events: none;
-  z-index: 1;
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass-dialog {
@@ -813,51 +793,59 @@ textarea::placeholder {
   background: var(--bg-elevated);
   color: var(--text-primary);
 }
-.dialog-close:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-ring);
-}
 
 /* ── Headings and view chrome ──────────────────────────────────────────── */
+/* Every view opens with the same header, so moving between them changes the
+   content and never the frame. `PageHeader.svelte` is the only producer. */
 .view-title {
-  font-size: var(--fs-2xl);
+  font-size: var(--fs-xl);
   font-weight: 700;
   letter-spacing: var(--letter-tighter);
   color: var(--text-primary);
   line-height: var(--lh-tight);
 }
-.view-subtitle {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  margin-top: 4px;
-  max-width: 640px;
-}
 .view-header {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 22px;
-  gap: 16px;
-  flex-wrap: wrap;
+  align-items: center;
+  flex-shrink: 0;
+  min-height: 36px;
+  margin-bottom: var(--space-4);
+  gap: var(--space-4);
 }
-.view-header > div:first-child {
-  flex: 1 1 280px;
-  min-width: 0;
+.view-header > .view-title {
+  flex-shrink: 0;
+}
+.view-header > .header-actions {
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+/* The label above a panel, shared by every view so panels are introduced the
+   same way everywhere. */
+.panel-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-wider);
+  color: var(--text-muted);
 }
 .header-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
   flex-wrap: wrap;
   min-width: 0;
 }
 .section-title {
-  font-size: var(--fs-xs);
-  font-weight: 600;
+  font-size: var(--fs-2xs);
+  font-weight: 650;
   text-transform: uppercase;
   letter-spacing: var(--letter-wider);
-  color: var(--text-muted);
-  margin-bottom: 14px;
+  color: var(--text-faint);
+  margin-bottom: var(--space-3);
 }
 .section-heading {
   font-size: var(--fs-md);
@@ -868,12 +856,12 @@ textarea::placeholder {
 }
 .section-sub {
   font-size: var(--fs-sm);
-  color: var(--text-secondary);
+  color: var(--text-muted);
   line-height: var(--lh-snug);
 }
 .display-num {
-  font-size: clamp(28px, 4vw, var(--fs-display));
-  font-weight: 750;
+  font-size: clamp(26px, 3.4vw, var(--fs-display));
+  font-weight: 700;
   letter-spacing: var(--letter-tighter);
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -901,7 +889,7 @@ textarea::placeholder {
 .toggle-slider {
   position: absolute;
   inset: 0;
-  background: var(--bg-elevated);
+  background: var(--bg-elevated-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
   transition: background var(--dur-normal) var(--ease), border-color var(--dur-normal) var(--ease);
@@ -918,15 +906,16 @@ textarea::placeholder {
   background: var(--text-muted);
   border-radius: 50%;
   transition: left var(--dur-normal) var(--spring), background var(--dur-normal) var(--ease);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
+/* Checked is solid ink with an inverted knob: on a monochrome chassis the
+   filled track is the state, and it survives forced-colors and greyscale. */
 .toggle input:checked + .toggle-slider {
-  background: var(--accent-dim);
-  border-color: var(--accent);
+  background: var(--accent);
+  border-color: transparent;
 }
 .toggle input:checked + .toggle-slider::before {
   left: 20px;
-  background: var(--accent);
+  background: var(--accent-fg);
 }
 .toggle input:focus-visible + .toggle-slider {
   box-shadow: var(--shadow-ring);
@@ -934,6 +923,15 @@ textarea::placeholder {
 .toggle input:disabled + .toggle-slider {
   opacity: 0.4;
   cursor: not-allowed;
+}
+@media (forced-colors: active) {
+  .toggle-slider {
+    border: 1px solid CanvasText;
+  }
+  .toggle input:checked + .toggle-slider {
+    background: Highlight;
+    forced-color-adjust: none;
+  }
 }
 
 /* Label + description + control: the settings row unit. */
@@ -958,15 +956,16 @@ textarea::placeholder {
 .setting-hint {
   font-size: var(--fs-xs);
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: 3px;
   line-height: var(--lh-snug);
+  max-width: 56ch;
 }
 
 /* ── Segmented control and pills ───────────────────────────────────────── */
 .seg {
   display: inline-flex;
   height: 32px;
-  background: var(--bg-card);
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 2px;
@@ -978,30 +977,26 @@ textarea::placeholder {
   gap: 5px;
   padding: 0 11px;
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-size: var(--fs-xs);
   font-weight: 600;
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .seg-btn:hover {
   color: var(--text-primary);
-  background: var(--bg-elevated);
 }
 .seg-btn.active {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-.seg-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-ring);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-xs);
 }
 
 .pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 13px;
+  height: 30px;
+  padding: 0 12px;
   border-radius: var(--radius-full);
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -1018,13 +1013,9 @@ textarea::placeholder {
   color: var(--text-primary);
 }
 .pill.active {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.pill:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-ring);
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-fg);
 }
 
 .kbd {
@@ -1044,7 +1035,11 @@ textarea::placeholder {
   border-radius: var(--radius-xs);
 }
 
-/* ── Signature accent edge ─────────────────────────────────────────────── */
+/* ── Signature element: the state edge ─────────────────────────────────────
+   A 2px bar on the leading edge of a surface, carrying one fact — muted,
+   warning, active. It is the app's one recurring flourish, and it works on a
+   monochrome chassis because it is the only place a status colour touches the
+   structure. */
 .edge-accent {
   position: relative;
 }
@@ -1052,12 +1047,8 @@ textarea::placeholder {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
-  width: 3px;
-  background: linear-gradient(
-    to bottom,
-    var(--edge-color, var(--accent)),
-    color-mix(in oklab, var(--edge-color, var(--accent)) 30%, transparent)
-  );
+  width: 2px;
+  background: var(--edge-color, var(--accent));
   pointer-events: none;
   z-index: 1;
 }

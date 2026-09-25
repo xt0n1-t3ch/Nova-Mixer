@@ -1,0 +1,41 @@
+# NovaMixer
+
+> NovaMixer is a free, open-source per-application volume mixer for Windows 10 and 11, built with Tauri 2, Rust, and Svelte 5. It gives every application its own fader and live peak meter, remembers each level and reapplies it whenever the application opens, groups applications under one volume, saves scenes, and runs in Windows efficiency mode. It makes no network requests. Author: xt0n1. License: Apache-2.0. Current version: 2.0.0.
+
+Key facts:
+
+- Platform: Windows 10 and 11, 64-bit. Requires the Microsoft Edge WebView2 runtime.
+- Install: per-user NSIS installer or MSI from GitHub Releases. No administrator rights needed.
+- Audio: Windows Core Audio session API. One application may own several audio sessions; NovaMixer shows them as one row and sets them together.
+- Meters: real `IAudioMeterInformation::GetPeakValue` readings, polled every 50 ms while the mixer is visible, clamped to 0..1.
+- Latency: a fader change reaches Windows in about 5 ms (measured p50 4.2 ms, p95 7.8 ms).
+- Resources: idle CPU under 1% of one core; the main process uses about 18 MB private memory.
+- Efficiency mode: EcoQoS plus idle priority, which shows the green leaf in Task Manager; the audio thread is exempt.
+- Status per application: Active, Idle, Locked, or No audio, as Windows reports it.
+- Identity: applications are matched by package app ID, then full path, then file name. Squirrel-installed apps such as Discord keep one identity across updates.
+
+## Docs
+
+- [README](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/README.md): features, screenshots, install, and build instructions
+- [Documentation index](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/docs/index.md): every maintained document and its owner
+- [Architecture](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/docs/architecture.md): package boundaries, the audio worker, and contract ownership
+- [Audio sessions](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/docs/audio-sessions.md): the Windows session model, callbacks, and application identity rules
+- [Efficiency mode](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/docs/efficiency-mode.md): how EcoQoS and idle priority are applied and verified
+- [Troubleshooting](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/docs/troubleshooting.md): build and runtime problems
+
+## API
+
+- [IPC contract](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/contracts/ipc.md): every command, event, and wire type between the Rust backend and the Svelte interface
+
+## Project
+
+- [Changelog](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/CHANGELOG.md): notable changes, Keep a Changelog format
+- [Contributing](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/CONTRIBUTING.md): Conventional Commits and the six validators
+- [Test index](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/tests/index.md): every test suite and what it covers
+- [Releases](https://github.com/xt0n1-t3ch/Nova-Mixer/releases): installers
+
+## Optional
+
+- [Design review](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/docs/design-review.md): the visual rules the interface is judged against
+- [Agent instructions](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/AGENTS.md): contract owners and interface rules for coding agents
+- [License](https://github.com/xt0n1-t3ch/Nova-Mixer/blob/main/LICENSE): Apache-2.0

@@ -3,11 +3,11 @@ name = "NovaMixer"
 version = "2.0.0"
 identifier = "io.github.xt0n1-t3ch.novamixer"
 author = "xt0n1"
-repository = "https://github.com/xt0n1-t3ch/NovaMixer"
+repository = "https://github.com/xt0n1-t3ch/Nova-Mixer"
 
 [links]
-releases = "https://github.com/xt0n1-t3ch/NovaMixer/releases"
-issues = "https://github.com/xt0n1-t3ch/NovaMixer/issues"
+releases = "https://github.com/xt0n1-t3ch/Nova-Mixer/releases"
+issues = "https://github.com/xt0n1-t3ch/Nova-Mixer/issues"
 author = "https://github.com/xt0n1-t3ch"
 
 [distribution.portable]

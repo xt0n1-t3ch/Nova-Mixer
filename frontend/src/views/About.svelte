@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * About as product identity plus live runtime.
+   * About: who made NovaMixer, what it does, and what it is doing now.
    *
    * A short facts list on a wide window left most of the viewport empty. This
    * pairs who NovaMixer is with what it is doing right now, which is what a
@@ -8,9 +8,10 @@
    * applications am I managing, is efficiency mode really on.
    */
   import { onMount } from "svelte";
-  import SlidersVertical from "@lucide/svelte/icons/sliders-vertical";
   import Check from "@lucide/svelte/icons/check";
   import { PRODUCT } from "../generated/product";
+  import logo from "../assets/novamixer-logo.png";
+  import PageHeader from "../components/PageHeader.svelte";
   import StatusRail from "../components/StatusRail.svelte";
   import { t } from "../lib/i18n/index";
 
@@ -19,6 +20,9 @@
 
   /** Matches `[workspace.package].license` in the root Cargo.toml. */
   const LICENSE = "Apache-2.0";
+
+  /** The author's handle, derived from the author URL in product.toml. */
+  const authorHandle = "@" + PRODUCT.authorUrl.replace(/\/+$/, "").split("/").pop();
 
   const CAPABILITIES = [
     "about.cap.policies",
@@ -46,25 +50,37 @@
   });
 </script>
 
+<PageHeader title={$t("view.about.title")} />
+
 <div class="about">
   <div class="about-main">
-    <section class="identity">
-      <span class="identity-mark" aria-hidden="true">
-        <SlidersVertical size={40} />
-      </span>
-      <div class="identity-copy">
-        <h1 class="identity-name">{$t("app.name")}</h1>
-        <p class="identity-tagline">{$t("app.tagline")}</p>
-        <div class="identity-meta">
-          <span class="chip chip-accent mono">v{version}</span>
-          <span class="chip">{LICENSE}</span>
-          <span class="identity-author">{$t("about.author", { author: PRODUCT.author })}</span>
-        </div>
+    <!-- Who made it comes first and plainly: the product, its author, and the
+         three facts a user checks — version, licence, source. -->
+    <section class="hero surface">
+      <img class="hero-logo" src={logo} alt="" width="72" height="72" />
+      <div class="hero-copy">
+        <h2 class="hero-name">{$t("app.name")}</h2>
+        <p class="hero-tagline">{$t("app.tagline")}</p>
+        <p class="hero-author">
+          {$t("about.createdBy")}
+          <strong>{PRODUCT.author}</strong>
+          <span class="hero-handle mono">{authorHandle}</span>
+        </p>
       </div>
+      <dl class="hero-facts">
+        <div>
+          <dt>{$t("about.version")}</dt>
+          <dd class="mono">v{version}</dd>
+        </div>
+        <div>
+          <dt>{$t("about.license")}</dt>
+          <dd class="mono">{LICENSE}</dd>
+        </div>
+      </dl>
     </section>
 
-    <section class="card">
-      <h2 class="card-title">{$t("about.capabilities")}</h2>
+    <section class="surface">
+      <h3 class="panel-label card-title">{$t("about.capabilities")}</h3>
       <ul class="capabilities">
         {#each CAPABILITIES as key (key)}
           <li>
@@ -75,9 +91,21 @@
       </ul>
     </section>
 
-    <section class="card">
-      <h2 class="card-title">{$t("about.runtime")}</h2>
+    <section class="surface">
+      <h3 class="panel-label card-title">{$t("about.links")}</h3>
       <dl class="facts">
+        <div class="fact">
+          <dt>{$t("about.author")}</dt>
+          <dd class="mono selectable">{PRODUCT.authorUrl}</dd>
+        </div>
+        <div class="fact">
+          <dt>{$t("about.repository")}</dt>
+          <dd class="mono selectable">{PRODUCT.repository}</dd>
+        </div>
+        <div class="fact">
+          <dt>{$t("about.releases")}</dt>
+          <dd class="mono selectable">{PRODUCT.releases}</dd>
+        </div>
         <div class="fact">
           <dt>{$t("about.audioEngine")}</dt>
           <dd>{$t("about.audioEngineValue")}</dd>
@@ -88,10 +116,6 @@
             <dd class="mono">{osVersion}</dd>
           </div>
         {/if}
-        <div class="fact">
-          <dt>{$t("about.repository")}</dt>
-          <dd class="mono repo">{PRODUCT.repository}</dd>
-        </div>
       </dl>
     </section>
   </div>
@@ -100,98 +124,88 @@
 </div>
 
 <style>
+  /* Same silhouette as Groups and Settings, mirrored: the product reads first,
+     and live status sits in the side column where a glance finds it. */
   .about {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 272px;
+    grid-template-columns: minmax(0, 1fr) var(--side-panel-width);
     gap: var(--space-4);
-    align-items: stretch;
-    flex: 1;
-    min-height: 0;
+    align-items: start;
   }
-
-  /* The capability list absorbs the leftover height: it is the block whose
-     content breathes best when given more room, so the column reaches the frame
-     without any card being padded out around empty space. */
   .about-main {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
     min-width: 0;
   }
-  .about-main > .card:first-of-type {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-  }
-  .about-main > .card:first-of-type .capabilities {
-    flex: 1;
-    align-content: space-evenly;
-  }
 
-  /* A large instrument mark rather than a small icon in a row: this is the one
-     place the product gets to introduce itself. */
-  .identity {
+  .hero {
     display: flex;
     align-items: center;
     gap: var(--space-5);
-    padding: var(--space-6) var(--space-5);
-    border-radius: var(--radius-2xl);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
+    padding: var(--space-5);
+    flex-wrap: wrap;
   }
-  .identity-mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 88px;
-    height: 88px;
+  .hero-logo {
+    width: 72px;
+    height: 72px;
     flex-shrink: 0;
-    border-radius: var(--radius-2xl);
-    background: linear-gradient(145deg, var(--bg-input), var(--bg-elevated));
-    color: var(--text-primary);
-    box-shadow:
-      inset 0 0 0 1px color-mix(in oklab, var(--text-primary) 22%, transparent),
-      var(--shadow-md);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
   }
-  .identity-copy {
+  .hero-copy {
+    flex: 1 1 240px;
     min-width: 0;
   }
-  .identity-name {
-    font-size: var(--fs-3xl);
-    font-weight: 750;
+  .hero-name {
+    font-size: var(--fs-2xl);
+    font-weight: 700;
     letter-spacing: var(--letter-tighter);
-    line-height: 1.1;
+    line-height: var(--lh-tight);
     color: var(--text-primary);
   }
-  .identity-tagline {
-    font-size: var(--fs-md);
-    color: var(--text-secondary);
+  .hero-tagline {
     margin-top: 4px;
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
   }
-  .identity-meta {
+  .hero-author {
     display: flex;
-    align-items: center;
-    gap: var(--space-2);
+    align-items: baseline;
     flex-wrap: wrap;
-    margin-top: var(--space-4);
-  }
-  .identity-author {
-    font-size: var(--fs-xs);
+    gap: 6px;
+    margin-top: var(--space-3);
+    font-size: var(--fs-sm);
     color: var(--text-muted);
   }
-
-  .card {
-    padding: var(--space-4) var(--space-5);
-    border-radius: var(--radius-lg);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
+  .hero-author strong {
+    font-weight: 650;
+    color: var(--text-primary);
   }
-  .card-title {
+  .hero-handle {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+  }
+  .hero-facts {
+    display: flex;
+    gap: var(--space-5);
+    margin: 0;
+  }
+  .hero-facts dt {
     font-size: var(--fs-2xs);
-    font-weight: 700;
+    font-weight: 650;
     text-transform: uppercase;
     letter-spacing: var(--letter-wider);
     color: var(--text-muted);
+  }
+  .hero-facts dd {
+    margin: 4px 0 0;
+    font-size: var(--fs-md);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .card-title {
     margin-bottom: var(--space-3);
   }
 
@@ -240,24 +254,20 @@
     color: var(--text-secondary);
     text-align: right;
     min-width: 0;
-  }
-  .repo {
-    font-size: var(--fs-xs);
     overflow-wrap: anywhere;
   }
-
-  @media (max-width: 1000px) {
-    .about {
-      grid-template-columns: minmax(0, 1fr);
-    }
+  .fact dd.mono {
+    font-size: var(--fs-xs);
+  }
+  /* Links are shown for copying: the app makes no network requests and opens
+     no browser, so a URL is text the user can select. */
+  .selectable {
+    user-select: text;
   }
 
-  @media (max-width: 700px) {
-    .identity {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: var(--space-4);
-      padding: var(--space-5) var(--space-4);
+  @media (max-width: 960px) {
+    .about {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

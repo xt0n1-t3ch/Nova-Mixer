@@ -16,6 +16,7 @@
   import Dialog from "../components/Dialog.svelte";
   import EmptyState from "../components/EmptyState.svelte";
   import GroupCard from "../components/GroupCard.svelte";
+  import PageHeader from "../components/PageHeader.svelte";
   import Range from "../components/Range.svelte";
   import {
     activateGroup,
@@ -122,14 +123,19 @@
 </script>
 
 <div class="view">
-  <div class="view-header">
-    <div>
-      <h1 class="view-title">{$t("view.groups.title")}</h1>
-      <p class="view-subtitle">{$t("view.groups.subtitle")}</p>
-    </div>
-    <!-- Creating a group lives at the end of the bank, where the list makes it
-         obvious what is being added to. -->
-  </div>
+  <PageHeader title={$t("view.groups.title")}>
+    {#snippet actions()}
+      {#if $groups.length > 0}
+        <button
+          class="btn btn-sm btn-primary"
+          onclick={() => (nameDialog = { mode: "create", value: "" })}
+        >
+          <Plus size={13} />
+          {$t("groups.new")}
+        </button>
+      {/if}
+    {/snippet}
+  </PageHeader>
 
   {#if $groups.length === 0}
     <EmptyState icon={Layers} title={$t("groups.empty.title")} body={$t("groups.empty.body")}>
@@ -146,14 +152,14 @@
            this screen belongs to the same console as the desk. -->
       <div class="groups-bank">
         <div class="bank-head">
-          <span class="bank-label">{$t("groups.bank")}</span>
-          <span class="bank-rule" aria-hidden="true"></span>
+          <span class="panel-label">{$t("groups.bank")}</span>
           <span class="bank-count mono">{$groups.length}</span>
         </div>
         <div class="groups-list">
           {#each $groups as group (group.id)}
             <GroupCard
               {group}
+              applications={$applications}
               memberCount={group.app_keys.length}
               isActive={group.id === $activeGroupId}
               isSelected={group.id === selected?.id}
@@ -168,13 +174,6 @@
             />
           {/each}
         </div>
-        <button
-          class="bank-add"
-          onclick={() => (nameDialog = { mode: "create", value: "" })}
-        >
-          <Plus size={14} />
-          {$t("groups.new")}
-        </button>
       </div>
 
       {#if selected}
@@ -233,7 +232,6 @@
                     <AppIcon
                       src={app.icon}
                       name={app.display_name}
-                      appKey={app.app_key}
                       size={20}
                       dimmed={!app.running}
                     />
@@ -406,7 +404,6 @@
               <AppIcon
                 src={app.icon}
                 name={app.display_name}
-                appKey={app.app_key}
                 size={26}
                 dimmed={!app.running}
               />
@@ -435,95 +432,52 @@
     min-height: 0;
   }
 
+  /* The bank and the detail share one grid with Settings and About: a fixed
+     side column and a fluid main column, so every secondary view has the same
+     silhouette. */
   .groups-layout {
     display: grid;
-    grid-template-columns: minmax(220px, 284px) minmax(0, 1fr);
+    grid-template-columns: var(--side-panel-width) minmax(0, 1fr);
     gap: var(--space-4);
-    align-items: stretch;
-    flex: 1;
-    min-height: 0;
+    align-items: start;
   }
 
-  /* The bank fills its column and keeps its own header and footer, so a short
-     list no longer leaves most of the left side blank. */
   .groups-bank {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    padding-right: var(--space-4);
-    border-right: 1px solid var(--border);
+    min-width: 0;
   }
   .bank-head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: var(--space-2);
-  }
-  .bank-label {
-    font-size: var(--fs-2xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-muted);
-  }
-  .bank-rule {
-    flex: 1;
-    height: 1px;
-    background: var(--border);
+    height: 20px;
   }
   .bank-count {
     font-size: var(--fs-2xs);
-    font-weight: 700;
-    color: var(--text-placeholder);
+    font-weight: 650;
+    color: var(--text-muted);
     font-variant-numeric: tabular-nums;
   }
 
-  /* The add slot follows the last card immediately rather than being pushed to
-     the bottom of the column, so a short list reads as a list with room after
-     it instead of two clusters with a void between them. */
   .groups-list {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
   }
-
-  /* A dashed slot at the end of the bank reads as "there is room for another
-     one" far better than a button in a page header. */
-  .bank-add {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    height: 44px;
-    border-radius: var(--radius-lg);
-    border: 1px dashed var(--border-strong);
-    color: var(--text-muted);
-    font-size: var(--fs-sm);
-    font-weight: 500;
-    transition:
-      color var(--dur-fast) var(--ease),
-      border-color var(--dur-fast) var(--ease),
-      background var(--dur-fast) var(--ease);
-  }
-  .bank-add:hover {
-    color: var(--text-primary);
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-  .bank-add:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-ring);
-  }
-
   .group-detail {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
     min-width: 0;
   }
-  /* The behaviour panel takes the remaining height so the detail column reaches
-     the frame rather than ending two thirds down. */
+  /* Panels hug their content. Stretching the last one to "reach the frame" left
+     roughly 230px of empty bordered box under "Respond to hotkeys", which reads
+     as a broken card rather than as a full column. */
   .group-detail > .surface:last-child {
-    flex: 1;
+    flex: 0 0 auto;
   }
 
   .detail-head {

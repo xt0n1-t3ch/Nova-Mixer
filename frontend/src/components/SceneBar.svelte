@@ -51,12 +51,15 @@
 <div class="scene-bar">
   <span class="scene-label">
     <Layers size={13} aria-hidden="true" />
-    {$t("scene.label")}
+    <span class="scene-label-text">{$t("scene.label")}</span>
   </span>
 
-  {#if $scenes.length === 0}
-    <span class="scene-hint">{$t("scene.emptyHint")}</span>
-  {:else}
+  <!-- No instructional sentence when the list is empty. "Set your levels, then
+       save them as a scene you can bring back in one click" spent a full band of
+       the console explaining a button that is already labelled, and it never
+       went away for users who had understood it the first time. The capture
+       button carries the affordance; its dialog carries the explanation. -->
+  {#if $scenes.length > 0}
     <ul class="scene-list">
       {#each $scenes as scene (scene.id)}
         <li class="scene-chip">
@@ -83,13 +86,15 @@
 
   <button
     class="btn btn-sm scene-capture"
+    aria-label={$t("scene.capture")}
+    title={$t("scene.capture")}
     onclick={() => {
       nameDraft = "";
       captureOpen = true;
     }}
   >
     <Camera size={13} />
-    {$t("scene.capture")}
+    <span class="capture-text">{$t("scene.capture")}</span>
   </button>
 </div>
 
@@ -145,15 +150,15 @@
 <style>
   /* A transport belt across the console, not a card: scenes are operational
      controls that sit between the master and the channels. */
+  /* No band of its own. Scenes are one segment inside the console header, so
+     this contributes a row of controls and lets the header own the surface,
+     the padding and the rule beneath it. */
   .scene-bar {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-3);
-    min-height: var(--scene-belt-height);
-    padding: 0 var(--space-4);
-    background: var(--bg-cap);
-    border-bottom: 1px solid var(--deck-line);
+    min-width: 0;
     overflow: hidden;
   }
 
@@ -167,13 +172,6 @@
     letter-spacing: var(--letter-wider);
     color: var(--text-muted);
     flex-shrink: 0;
-  }
-
-  .scene-hint {
-    font-size: var(--fs-xs);
-    color: var(--text-placeholder);
-    flex: 1;
-    min-width: 0;
   }
 
   /* Scenes overflow horizontally rather than wrapping into a second belt,
@@ -194,9 +192,14 @@
 
   /* Apply and delete are one visual pill but two targets, so a mis-click
      cannot destroy a scene the user meant to run. */
+  /* `flex-shrink: 0` matters. Without it a narrow window squeezed every chip
+     until "Gaming" became "Gami…" and "Call" became "C…" — a scene name cut to
+     one letter identifies nothing, and the row already scrolls, so shrinking
+     bought nothing. Chips keep their natural width and overflow instead. */
   .scene-chip {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     height: 28px;
     border-radius: var(--radius-full);
     background: var(--bg-card);
@@ -234,7 +237,7 @@
     justify-content: center;
     width: 24px;
     height: 100%;
-    color: var(--text-placeholder);
+    color: var(--text-faint);
     border-left: 1px solid var(--border);
   }
   .scene-delete:hover {
@@ -248,6 +251,15 @@
 
   .scene-capture {
     flex-shrink: 0;
+  }
+
+  /* On a narrow window the labels go first; the icons and the scene names
+     stay, since those are what a user actually clicks. */
+  @media (max-width: 1180px) {
+    .scene-label-text,
+    .capture-text {
+      display: none;
+    }
   }
 
   .field {

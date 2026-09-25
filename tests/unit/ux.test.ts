@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   debounce,
+  acceleratorFromEvent,
   formatAccelerator,
   initialFor,
   isViewId,
   matchesQuery,
-  tintForKey,
   VIEW_IDS,
+  type KeyChord,
 } from "@/lib/ux";
 
 describe("matchesQuery", () => {
@@ -27,17 +28,6 @@ describe("matchesQuery", () => {
 
   it("reports no match when nothing contains the needle", () => {
     expect(matchesQuery("firefox", ["Spotify", "Spotify.exe"])).toBe(false);
-  });
-});
-
-describe("tintForKey", () => {
-  it("is stable, so an app keeps its colour between launches", () => {
-    expect(tintForKey("spotify.exe")).toBe(tintForKey("spotify.exe"));
-  });
-
-  it("spreads distinct keys across more than one tint", () => {
-    const keys = ["a.exe", "b.exe", "c.exe", "d.exe", "e.exe", "f.exe", "g.exe", "h.exe"];
-    expect(new Set(keys.map(tintForKey)).size).toBeGreaterThan(1);
   });
 });
 
@@ -77,6 +67,48 @@ describe("formatAccelerator", () => {
 
   it("spaces the plus signs in a chord", () => {
     expect(formatAccelerator("Control+Alt+Up")).toBe("Control + Alt + Up");
+  });
+
+  it("shows physical key codes as the key a user sees", () => {
+    expect(formatAccelerator("Control+Shift+KeyM")).toBe("Control + Shift + M");
+    expect(formatAccelerator("Alt+Digit7")).toBe("Alt + 7");
+    expect(formatAccelerator("Control+ArrowUp")).toBe("Control + Up");
+  });
+});
+
+describe("acceleratorFromEvent", () => {
+  const chord = (over: Partial<KeyChord>): KeyChord => ({
+    key: "",
+    code: "",
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    metaKey: false,
+    ...over,
+  });
+
+  it("uses the physical key, so a Spanish layout still gives a valid accelerator", () => {
+    // On a Spanish layout Shift+7 types "/": `event.key` would build
+    // `Control+Shift+/`, which the global-shortcut parser rejects.
+    expect(
+      acceleratorFromEvent(chord({ key: "/", code: "Digit7", ctrlKey: true, shiftKey: true })),
+    ).toBe("Control+Shift+Digit7");
+    expect(acceleratorFromEvent(chord({ key: "m", code: "KeyM", ctrlKey: true, altKey: true }))).toBe(
+      "Control+Alt+KeyM",
+    );
+  });
+
+  it("binds media and function keys without a modifier", () => {
+    expect(acceleratorFromEvent(chord({ key: "AudioVolumeUp", code: "" }))).toBe("AudioVolumeUp");
+    expect(acceleratorFromEvent(chord({ key: "F9", code: "F9" }))).toBe("F9");
+  });
+
+  it("refuses a bare letter, which would swallow that key in every application", () => {
+    expect(acceleratorFromEvent(chord({ key: "m", code: "KeyM" }))).toBeNull();
+  });
+
+  it("waits for a real key while only modifiers are held", () => {
+    expect(acceleratorFromEvent(chord({ key: "Control", code: "ControlLeft", ctrlKey: true }))).toBeNull();
   });
 });
 

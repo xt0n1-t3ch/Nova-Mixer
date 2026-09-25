@@ -39,21 +39,11 @@ export function matchesQuery(
   return fields.some((field) => field != null && field.toLowerCase().includes(needle));
 }
 
-/**
- * Deterministic tint for an app that has no icon, so the same application keeps
- * the same colour between launches instead of flickering on every render.
- */
-export type BadgeTint = "blue" | "green" | "orange" | "red" | "purple" | "teal";
-
-const BADGE_TINTS: readonly BadgeTint[] = ["blue", "green", "orange", "red", "purple", "teal"];
-
-export function tintForKey(key: string): BadgeTint {
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) {
-    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
-  }
-  return BADGE_TINTS[hash % BADGE_TINTS.length];
-}
+/* A deterministic per-application tint used to live here, colouring the
+   lettered avatar of any application whose icon could not be extracted. It was
+   removed with the monochrome chassis: a saturated tile sits in the same row as
+   a level meter, and in this interface colour in a channel means signal. The
+   fallback avatar is now neutral and identity comes from the letter. */
 
 /** First letter shown in place of a missing icon. */
 export function initialFor(name: string): string {
@@ -109,7 +99,6 @@ export interface Shortcut {
 
 export const SHORTCUTS: readonly Shortcut[] = [
   { keys: ["mod", "k"], descriptionKey: "shortcut.commandPalette" },
-  { keys: ["/"], descriptionKey: "shortcut.focusSearch" },
   { keys: ["g", "a"], descriptionKey: "shortcut.goApplications" },
   { keys: ["g", "g"], descriptionKey: "shortcut.goGroups" },
   { keys: ["g", "s"], descriptionKey: "shortcut.goSettings" },
@@ -159,10 +148,62 @@ function subsequenceScore(needle: string, haystack: string): number | null {
 }
 
 /** Human label for a Tauri accelerator, e.g. `"AudioVolumeUp"` → `"Audio Volume Up"`. */
+/** The key fields of a `KeyboardEvent` the accelerator mapping reads. */
+export interface KeyChord {
+  key: string;
+  code: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+}
+
+/** Media and function keys that are safe to bind with no modifier. */
+const STANDALONE_KEYS =
+  /^(AudioVolume(Up|Down|Mute)|MediaTrack(Next|Previous)|MediaPlayPause|MediaStop|F([1-9]|1\d|2[0-4]))$/;
+
+/**
+ * Builds a global-shortcut accelerator from a key press, or returns null when
+ * the press cannot be a shortcut on its own.
+ *
+ * It reads `event.code`, the physical key, rather than `event.key`, the typed
+ * character. `event.key` changes with the keyboard layout and with Shift (on a
+ * Spanish layout Shift+7 is "/"), which produced accelerators such as
+ * `Control+Shift+/` that the backend rejects. `KeyA`, `Digit7` and `Minus` are
+ * the names the backend parses, on every layout.
+ */
+export function acceleratorFromEvent(event: KeyChord): string | null {
+  if (["Control", "Shift", "Alt", "Meta", "AltGraph", "OS"].includes(event.key)) return null;
+  // Media keys report an empty or unidentified `code` on some keyboards; their
+  // `key` carries the standard name.
+  const media = STANDALONE_KEYS.test(event.key) ? event.key : null;
+  const key = media ?? (event.code && event.code !== "Unidentified" ? event.code : null);
+  if (!key) return null;
+
+  const parts: string[] = [];
+  if (event.ctrlKey) parts.push("Control");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  if (event.metaKey) parts.push("Super");
+
+  // A bare letter bound globally would swallow that key in every application,
+  // so anything but a media or function key needs a modifier.
+  if (parts.length === 0 && !STANDALONE_KEYS.test(key)) return null;
+  parts.push(key);
+  return parts.join("+");
+}
+
+/** Readable form of an accelerator for display, e.g. `Control + Alt + A`. */
 export function formatAccelerator(accelerator: string | null): string | null {
   if (!accelerator) return null;
   return accelerator
     .split("+")
-    .map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2"))
+    .map((part) =>
+      part
+        .replace(/^Key([A-Z])$/, "$1")
+        .replace(/^Digit(\d)$/, "$1")
+        .replace(/^Arrow(Up|Down|Left|Right)$/, "$1")
+        .replace(/([a-z])([A-Z])/g, "$1 $2"),
+    )
     .join(" + ");
 }

@@ -78,21 +78,29 @@ pub struct Registry<S: SessionSource> {
     sessions: HashMap<String, S::Handle>,
     applications: HashMap<String, Application>,
     groups: Vec<Group>,
+    remembered_policy: HashSet<String>,
     policy_applied: HashSet<String>,
 }
 impl<S: SessionSource> Registry<S> {
     pub fn start(
         mut source: S,
-        applications: Vec<Application>,
+        mut applications: Vec<Application>,
         mut groups: Vec<Group>,
     ) -> Result<Self> {
         let handles = source.enumerate()?;
+        migrate_persisted_identities(&mut applications, &mut groups);
         let applications = deduplicate_applications(applications, &mut groups);
+        let remembered_policy = applications
+            .values()
+            .filter(|app| app.remembered)
+            .map(|app| app.app_key.clone())
+            .collect();
         let mut value = Self {
             source,
             sessions: HashMap::new(),
             applications,
             groups,
+            remembered_policy,
             policy_applied: HashSet::new(),
         };
         for h in handles {
@@ -124,20 +132,20 @@ impl<S: SessionSource> Registry<S> {
         app.running = !sessions.is_empty();
         app.controllable = sessions.iter().any(|s| s.controllable);
         app.peak = sessions.iter().map(|s| s.peak).fold(0.0, f32::max);
-        if !sessions.is_empty() {
-            let first_v = sessions[0].volume;
-            let first_m = sessions[0].muted;
-            app.mixed = !self.policy_applied.contains(key)
-                && sessions
-                    .iter()
-                    .any(|s| (s.volume - first_v).abs() > 0.0001 || s.muted != first_m);
-            if app.mixed {
-                app.volume = first_v;
-                app.muted = first_m;
-            } else if self.policy_applied.contains(key) {
+        if let Some(first) = sessions.first() {
+            let agrees = sessions.iter().all(|session| {
+                (session.volume - first.volume).abs() <= 0.0001 && session.muted == first.muted
+            });
+            if agrees {
+                // Agreeing live sessions remain authoritative after policy application; otherwise
+                // an external mixer change would leave the application row reporting stale policy.
+                app.volume = first.volume;
+                app.muted = first.muted;
+                app.mixed = false;
             } else {
-                app.volume = first_v;
-                app.muted = first_m;
+                // A user policy is the intended convergence point once one exists. Without one,
+                // disagreement has no truthful scalar representation and must remain visibly mixed.
+                app.mixed = !self.policy_applied.contains(key);
             }
         }
         app.sessions = sessions;
@@ -163,14 +171,23 @@ impl<S: SessionSource> Registry<S> {
                 .expect("merge key exists");
             let merged = merge_discovered_application(persisted, &discovered);
             replace_group_key(&mut self.groups, &old_key, &key);
+            if self.remembered_policy.remove(&old_key) {
+                self.remembered_policy.insert(key.clone());
+            }
             self.applications.insert(key.clone(), merged);
         } else if !existed {
             let mut app = discovered;
             app.sort_order = self.applications.len() as u32;
             self.applications.insert(key.clone(), app);
+        } else if let Some(app) = self.applications.get_mut(&key) {
+            refresh_from_live(app, &discovered);
         }
-        if apply_policy {
-            if let Some(app) = self.applications.get(&key).filter(|a| a.remembered) {
+        if self.applications.get(&key).is_some_and(|app| {
+            app.remembered
+                && (self.remembered_policy.contains(&key)
+                    || apply_policy && self.policy_applied.contains(&key))
+        }) {
+            if let Some(app) = self.applications.get(&key) {
                 handle.set_mute(app.muted)?;
                 handle.set_volume(app.volume)?;
                 self.policy_applied.insert(key.clone());
@@ -260,7 +277,17 @@ impl<S: SessionSource> Registry<S> {
     }
     pub fn remove(&mut self, id: &str) -> Option<Application> {
         let key = self.sessions.remove(id)?.snapshot().app_key;
-        self.aggregate(&key)
+        let app = self.aggregate(&key)?;
+        // An unremembered record is one settings no longer mention; it was only
+        // being held so a still-playing source stayed controllable. Once its
+        // last session is gone nothing justifies the row, so the registry drops
+        // it rather than keeping a forgotten application listed forever.
+        if !app.running && !app.remembered {
+            self.applications.remove(&key);
+            self.policy_applied.remove(&key);
+            self.remembered_policy.remove(&key);
+        }
+        Some(app)
     }
     pub fn reconcile(&mut self) -> Result<Vec<AudioEvent>> {
         let handles = self.source.enumerate()?;
@@ -317,14 +344,103 @@ impl<S: SessionSource> Registry<S> {
             applications,
         }
     }
-    pub fn update_settings(&mut self, applications: Vec<Application>, mut groups: Vec<Group>) {
-        self.applications = deduplicate_applications(applications, &mut groups);
+    pub fn update_settings(&mut self, mut applications: Vec<Application>, mut groups: Vec<Group>) {
+        migrate_persisted_identities(&mut applications, &mut groups);
+        let live = self
+            .sessions
+            .values()
+            .map(SessionHandle::application)
+            .collect();
+        let (applications, remembered_policy) =
+            merge_settings_with_live(applications, live, &mut groups);
+        let policy_applied =
+            remap_policy_keys(&self.applications, &self.policy_applied, &applications);
+        self.applications = applications;
+        self.remembered_policy = remembered_policy;
+        self.policy_applied = policy_applied;
         self.groups = groups;
     }
     pub fn source_mut(&mut self) -> &mut S {
         &mut self.source
     }
 }
+/// Settings saved before the current identity rule can hold stale path keys
+/// (one per Squirrel version folder); collapse them before matching live sessions.
+fn migrate_persisted_identities(applications: &mut Vec<Application>, groups: &mut [Group]) {
+    audio_policy::migrate_path_identities(applications, groups, &mut [], |path| {
+        Path::new(path).is_file()
+    });
+}
+
+fn merge_settings_with_live(
+    persisted: Vec<Application>,
+    live: Vec<Application>,
+    groups: &mut [Group],
+) -> (HashMap<String, Application>, HashSet<String>) {
+    let remembered: Vec<_> = persisted
+        .iter()
+        .filter(|app| app.remembered)
+        .cloned()
+        .collect();
+    let saved = persisted.clone();
+    let running = live.clone();
+    // Settings are authoritative because they enter deduplication first. Live records then upgrade
+    // filename identities to paths without allowing a disk save to orphan an active Core Audio
+    // session merely because discovery happened after the previous save.
+    let mut applications =
+        deduplicate_applications(persisted.into_iter().chain(live).collect(), groups);
+    // Deduplication keeps the persisted record for a shared key, and a saved
+    // record can name an install folder that no longer runs (Squirrel keeps one
+    // `app-<version>` folder per update under one key). The running executable
+    // is the truth for everything the session reports about itself.
+    for live_app in &running {
+        if let Some(app) = applications.get_mut(&live_app.app_key) {
+            refresh_from_live(app, live_app);
+        }
+    }
+    // A record retained only because it is audible is not a managed application: settings no longer
+    // mention it. `Application::offline` defaults `remembered` to true, so without this the record
+    // would look like a stored preference and the next snapshot save would write a forgotten
+    // application straight back to disk, making "Forget" silently fail for anything playing.
+    for app in applications.values_mut() {
+        if !saved.iter().any(|entry| same_application(entry, app)) {
+            app.remembered = false;
+        }
+    }
+    let remembered_policy = applications
+        .values()
+        .filter(|app| remembered.iter().any(|saved| same_application(saved, app)))
+        .map(|app| app.app_key.clone())
+        .collect();
+    (applications, remembered_policy)
+}
+
+fn same_application(left: &Application, right: &Application) -> bool {
+    left.app_key.eq_ignore_ascii_case(&right.app_key)
+        || (left.identity_kind == IdentityKind::Filename
+            || right.identity_kind == IdentityKind::Filename)
+            && application_filename(left)
+                .zip(application_filename(right))
+                .is_some_and(|(left, right)| left.eq_ignore_ascii_case(&right))
+}
+
+fn remap_policy_keys(
+    previous: &HashMap<String, Application>,
+    policy_applied: &HashSet<String>,
+    current: &HashMap<String, Application>,
+) -> HashSet<String> {
+    policy_applied
+        .iter()
+        .filter_map(|old_key| {
+            let old = previous.get(old_key)?;
+            current
+                .iter()
+                .find(|(_, app)| same_application(old, app))
+                .map(|(key, _)| key.clone())
+        })
+        .collect()
+}
+
 fn deduplicate_applications(
     applications: Vec<Application>,
     groups: &mut [Group],
@@ -389,6 +505,40 @@ fn merge_discovered_application(
         persisted.display_name = discovered.display_name.clone();
     }
     persisted
+}
+
+/// Brings a stored application up to date with the executable its live session
+/// runs from, keeping every user choice.
+///
+/// One `app_key` can cover several install folders (Squirrel.Windows
+/// `app-<version>`), so the stored `executable_path` must follow the running
+/// executable. When the path changes, the icon and the discovered name are taken
+/// from the live executable too, so they describe the same file; a missing live
+/// icon keeps the previous one. Returns `true` when anything changed.
+///
+/// Shared by the fake-source `Registry` and the Windows worker so the two
+/// adopt paths cannot drift.
+pub fn refresh_from_live(app: &mut Application, live: &Application) -> bool {
+    let mut changed = false;
+    if live.executable_path.is_some() && app.executable_path != live.executable_path {
+        app.executable_path = live.executable_path.clone();
+        if live.icon.is_some() {
+            app.icon = live.icon.clone();
+        }
+        if app.custom_name.is_none() && !live.display_name.is_empty() {
+            app.display_name = live.display_name.clone();
+        }
+        changed = true;
+    }
+    if live.executable_name.is_some() && app.executable_name != live.executable_name {
+        app.executable_name = live.executable_name.clone();
+        changed = true;
+    }
+    if app.icon.is_none() && live.icon.is_some() {
+        app.icon = live.icon.clone();
+        changed = true;
+    }
+    changed
 }
 
 fn replace_group_key(groups: &mut [Group], old_key: &str, new_key: &str) {
@@ -577,6 +727,43 @@ pub(crate) enum Command {
     RebuildEndpoint,
     Shutdown,
 }
+/// Normalizes a Windows meter reading to the contract's `0.0`–`1.0` range.
+///
+/// `IAudioMeterInformation::GetPeakValue` can report above 1.0 for a
+/// floating-point stream that is louder than full scale (Spotify was measured
+/// at 2.5), and a failed read can surface as NaN. The meter shows the level as
+/// it is, clipped at full scale, and never an invented value.
+pub fn meter_level(peak: f32) -> f32 {
+    if peak.is_nan() {
+        0.0
+    } else {
+        peak.clamp(0.0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod meter_level_tests {
+    use super::meter_level;
+
+    #[test]
+    fn keeps_in_range_readings_exact() {
+        assert_eq!(meter_level(0.0), 0.0);
+        assert_eq!(meter_level(0.426), 0.426);
+        assert_eq!(meter_level(1.0), 1.0);
+    }
+
+    #[test]
+    fn clips_an_over_full_scale_stream_to_full_scale() {
+        assert_eq!(meter_level(2.534), 1.0);
+    }
+
+    #[test]
+    fn turns_a_bad_reading_into_silence() {
+        assert_eq!(meter_level(f32::NAN), 0.0);
+        assert_eq!(meter_level(-0.1), 0.0);
+    }
+}
+
 #[cfg(windows)]
 mod platform;
 #[cfg(not(windows))]

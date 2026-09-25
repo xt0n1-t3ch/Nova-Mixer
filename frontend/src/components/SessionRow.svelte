@@ -37,17 +37,12 @@
 </script>
 
 <div class="session-row" class:is-idle={session.state === "inactive"}>
-  <span class="session-name truncate" title={label}>{label}</span>
+  <span class="session-name truncate" title={label}>
+    {label}
+    {#if session.process_id !== null}<span class="session-pid mono">{session.process_id}</span>{/if}
+  </span>
 
-  {#if session.process_id !== null}
-    <span class="session-pid mono">{session.process_id}</span>
-  {:else}
-    <span></span>
-  {/if}
-
-  <Meter peak={session.muted ? 0 : peak} bars={3} />
-
-  <div class="session-fader">
+  <div class="session-level">
     <Range
       value={session.volume}
       disabled={!session.controllable}
@@ -58,6 +53,9 @@
       {onInput}
       {onCommit}
     />
+    <div class="session-meter">
+      <Meter peak={session.muted ? 0 : peak} bars={24} />
+    </div>
   </div>
 
   <output class="session-value mono" for="">{formatPercent(session.volume)}</output>
@@ -81,20 +79,15 @@
 </div>
 
 <style>
-  /* Columns deliberately echo the parent row's rhythm so the disclosure reads
-     as a nested detail rather than as a different kind of object. */
+  /* The parent's grid minus its identity width, so each stream's fader sits
+     under the application's fader. */
   .session-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 48px auto minmax(90px, 1.6fr) 44px 26px;
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 2.6fr) 44px 34px;
     align-items: center;
-    gap: var(--space-2);
-    height: 36px;
-    padding: 0 var(--space-2);
-    border-radius: var(--radius-sm);
-    transition: background var(--dur-fast) var(--ease);
-  }
-  .session-row:hover {
-    background: var(--bg-elevated);
+    gap: var(--space-4);
+    min-height: 36px;
+    padding: 2px 62px 2px 0;
   }
   .session-row.is-idle {
     opacity: 0.6;
@@ -109,29 +102,27 @@
     color: var(--text-secondary);
   }
   .session-pid {
+    margin-left: 6px;
     font-size: var(--fs-2xs);
-    color: var(--text-placeholder);
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
   }
-
-  .session-fader {
+  .session-level {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
     min-width: 0;
   }
-
+  .session-meter {
+    height: 3px;
+    padding: 0 2px;
+  }
+  .session-meter :global(.meter) {
+    height: 100%;
+  }
   .session-value {
     font-size: var(--fs-xs);
     color: var(--text-muted);
     text-align: right;
     font-variant-numeric: tabular-nums;
-  }
-
-  @media (max-width: 700px) {
-    .session-row {
-      grid-template-columns: minmax(0, 1fr) minmax(80px, 1.4fr) 44px 26px;
-    }
-    .session-pid {
-      display: none;
-    }
   }
 </style>
